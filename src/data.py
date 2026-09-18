@@ -6,6 +6,7 @@ import tensorflow as tf
 from sklearn.utils.class_weight import compute_class_weight
 
 from config import CLASS_NAMES, CNN, FER_DIR, NUM_CLASSES, SEED, VAL_SPLIT, VGG16
+from src.preprocess import preprocess_custom_cnn, preprocess_vgg16
 
 AUTOTUNE = tf.data.AUTOTUNE
 
@@ -40,17 +41,6 @@ def _safe_class_weights(y: np.ndarray, num_classes: int) -> Dict[int, float]:
     weights = compute_class_weight("balanced", classes=present, y=y)
     by_class = {int(c): float(w) for c, w in zip(present, weights)}
     return {c: by_class.get(c, 1.0) for c in range(num_classes)}
-
-
-def _preprocess_custom_cnn(images: tf.Tensor, labels: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-    """Scale grayscale pixels from [0, 255] to [0, 1]."""
-    return tf.cast(images, tf.float32) / 255.0, labels
-
-
-def _preprocess_vgg16(images: tf.Tensor, labels: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-    """Convert grayscale to 3-channel and apply Keras' VGG16 preprocessing."""
-    images = tf.image.grayscale_to_rgb(images)
-    return tf.keras.applications.vgg16.preprocess_input(images), labels
 
 
 def get_datasets(
@@ -97,10 +87,11 @@ def get_datasets(
     train_labels = np.concatenate([y.numpy() for _, y in train_ds], axis=0)
     class_weights = _safe_class_weights(train_labels, NUM_CLASSES)
 
-    preprocess = _preprocess_custom_cnn if model_name == "custom_cnn" else _preprocess_vgg16
-    train_ds = train_ds.map(preprocess, num_parallel_calls=AUTOTUNE)
-    val_ds = val_ds.map(preprocess, num_parallel_calls=AUTOTUNE)
-    test_ds = test_ds.map(preprocess, num_parallel_calls=AUTOTUNE)
+    # Shared with src/preprocess.py so live camera frames match training exactly (Phase 7).
+    preprocess_fn = preprocess_custom_cnn if model_name == "custom_cnn" else preprocess_vgg16
+    train_ds = train_ds.map(lambda x, y: (preprocess_fn(x), y), num_parallel_calls=AUTOTUNE)
+    val_ds = val_ds.map(lambda x, y: (preprocess_fn(x), y), num_parallel_calls=AUTOTUNE)
+    test_ds = test_ds.map(lambda x, y: (preprocess_fn(x), y), num_parallel_calls=AUTOTUNE)
 
     if model_name == "custom_cnn":
         train_ds = train_ds.cache()

@@ -1,0 +1,22 @@
+# Python 3.11 recommended (TensorFlow + MediaPipe support)
+tensorflow>=2.16,<2.21
+opencv-python>=4.9
+mediapipe>=0.10.14
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+tqdm
+pytest
+jupyter
+ipykernel
+
+# model viewing / figures
+netron
+visualkeras
+tensorboard
+
+# optional demo UI (Phase 7)
+streamlit
+streamlit-webrtc

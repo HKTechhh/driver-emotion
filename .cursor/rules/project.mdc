@@ -1,0 +1,36 @@
+---
+description: Driver emotion recognition project — goals, layout and coding rules
+alwaysApply: true
+---
+
+# Project context
+Final-year CS research project: recognise driver emotions from real-time facial images under urban
+traffic conditions. Comparative study of two models on FER2013 (7 classes):
+- **Model A** `custom_cnn` — trained from scratch, built from VGG-style blocks (2× Conv3×3 → MaxPool 2×2), 48×48 grayscale.
+- **Model B** `vgg16` — Keras VGG16 pretrained on ImageNet, two-stage transfer learning, 224×224×3.
+Results feed a 15-page research paper, so reproducibility and clean logging matter more than cleverness.
+
+The step-by-step plan is in `PLAN.md`. Only work on the phase the user asks for.
+
+# Stack
+Python 3.11 · TensorFlow/Keras 3 · OpenCV · MediaPipe · NumPy · pandas · scikit-learn · matplotlib/seaborn · pytest.
+Don't add PyTorch or other frameworks.
+
+# Layout
+- `config.py` — the ONLY place for paths and hyperparameters. Import from it; never hard-code. Don't edit it unless asked.
+- `src/data.py` datasets · `src/preprocess.py` shared preprocessing (training AND real-time must use it)
+- `src/models/custom_cnn.py`, `src/models/vgg16_tl.py` model builders
+- `src/train.py`, `src/evaluate.py`, `src/compare.py`, `src/robustness.py`, `src/gradcam.py`, `src/realtime.py`
+- `tests/` pytest · `notebooks/` exploration only (no logic that scripts depend on)
+- Outputs: `models/*.keras`, `results/*.csv|json`, `results/figures/*.png`, `logs/` (TensorBoard)
+
+# Coding rules
+- Run scripts as modules from the repo root: `python -m src.train ...`. Every script has an argparse CLI and a `main()`.
+- Call `set_seed(SEED)` at the start of every script that trains or samples.
+- Every training/evaluation script must accept `--subset` so it can be smoke-tested on CPU in about a minute.
+- Save models in `.keras` format. Save figures as PNG at 200 dpi with titles, axis labels and CLASS_NAMES as tick labels.
+- Every result goes to a file (CSV/JSON/PNG). Never rely on printed output alone.
+- Name layers clearly (`block1_conv1`, …) so the models read well in Netron and in the paper.
+- Type hints and short docstrings on public functions. Keep functions small.
+- Only edit the files the user names or the phase requires. Don't reformat unrelated code.
+- After writing code, give the exact terminal command to test it.

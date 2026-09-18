@@ -26,11 +26,18 @@ from config import (
 )
 from src.data import get_datasets
 from src.models.custom_cnn import build_custom_cnn
+from src.models.vgg16_tl import build_vgg16, unfreeze_top
 from src.utils import count_params, ensure_dirs, set_seed
 
 
 def _build_callbacks(run_name: str, monitor: str = "val_accuracy") -> list:
-    """Standard callback set shared by every training run."""
+    """Standard callback set shared by every training run.
+
+    CSVLogger uses `append=True` so a run's history survives being written across
+    multiple `fit()` calls (needed for vgg16's two training stages); ModelCheckpoint's
+    `best` is likewise only reset when a *new* callback instance is created, so reusing
+    the same callback list across stages keeps "best across the whole run" correct.
+    """
     return [
         tf.keras.callbacks.ModelCheckpoint(
             str(MODELS_DIR / f"{run_name}.keras"),
@@ -45,8 +52,14 @@ def _build_callbacks(run_name: str, monitor: str = "val_accuracy") -> list:
             monitor=monitor, mode="max", factor=LR_FACTOR, patience=LR_PATIENCE
         ),
         tf.keras.callbacks.TensorBoard(log_dir=str(LOGS_DIR / run_name)),
-        tf.keras.callbacks.CSVLogger(str(RESULTS_DIR / f"{run_name}_history.csv")),
+        tf.keras.callbacks.CSVLogger(str(RESULTS_DIR / f"{run_name}_history.csv"), append=True),
     ]
+
+
+def _combine_histories(first: dict, second: dict) -> dict:
+    """Concatenate two per-epoch `History.history` dicts (stage 1 + stage 2), key-wise."""
+    keys = set(first) | set(second)
+    return {key: list(first.get(key, [])) + list(second.get(key, [])) for key in keys}
 
 
 def _save_curves(history: dict, run_name: str, finetune_start: Optional[int] = None) -> None:
@@ -137,8 +150,68 @@ def train_custom_cnn(args: argparse.Namespace) -> None:
 
 
 def train_vgg16(args: argparse.Namespace) -> None:
-    """Train Model B (VGG16 transfer learning). Implemented in Phase 3."""
-    raise NotImplementedError("train_vgg16 is implemented in Phase 3.")
+    """Train Model B (VGG16) in two stages: frozen ImageNet base, then fine-tune the top block.
+
+    `--epochs`, if given, overrides both `head_epochs` and `finetune_epochs` (used for
+    quick smoke tests that exercise both stages). The same callbacks are reused across
+    both `fit()` calls so checkpointing tracks the best epoch across the whole run.
+    """
+    cfg = dict(VGG16)
+    img_size = args.img_size or cfg["img_size"]
+    head_epochs = cfg["head_epochs"] if args.epochs is None else args.epochs
+    finetune_epochs = cfg["finetune_epochs"] if args.epochs is None else args.epochs
+
+    train_ds, val_ds, _test_ds, class_weights = get_datasets(
+        "vgg16", subset=args.subset, img_size=img_size
+    )
+    model = build_vgg16(cfg=cfg, img_size=img_size)
+    callbacks = _build_callbacks(args.run_name)
+
+    # Stage 1: frozen ImageNet base.
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(cfg["head_lr"]),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    start = time.time()
+    history_head = model.fit(
+        train_ds,
+        validation_data=val_ds,
+        epochs=head_epochs,
+        class_weight=class_weights,
+        callbacks=callbacks,
+    )
+
+    # Stage 2: unfreeze the top block and fine-tune at a lower learning rate.
+    unfreeze_top(model, cfg["unfreeze_from"])
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(cfg["finetune_lr"]),
+        loss="sparse_categorical_crossentropy",
+        metrics=["accuracy"],
+    )
+    history_finetune = model.fit(
+        train_ds,
+        validation_data=val_ds,
+        epochs=head_epochs + finetune_epochs,
+        initial_epoch=head_epochs,
+        class_weight=class_weights,
+        callbacks=callbacks,
+    )
+    minutes = (time.time() - start) / 60
+
+    combined = _combine_histories(history_head.history, history_finetune.history)
+    _save_curves(combined, args.run_name, finetune_start=head_epochs)
+    _log_run(
+        run_name=args.run_name,
+        model_name="vgg16",
+        epochs_run=len(combined["loss"]),
+        best_val_acc=max(combined["val_accuracy"]),
+        params=count_params(model),
+        minutes=minutes,
+        img_size=img_size,
+        batch_size=cfg["batch_size"],
+        lr=cfg["finetune_lr"],
+    )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

@@ -1,5 +1,5 @@
 """tf.data pipelines for FER2013, shared by training and evaluation for both models."""
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import tensorflow as tf
@@ -54,12 +54,13 @@ def _preprocess_vgg16(images: tf.Tensor, labels: tf.Tensor) -> Tuple[tf.Tensor, 
 
 
 def get_datasets(
-    model_name: str, subset: float = 1.0
+    model_name: str, subset: float = 1.0, img_size: Optional[int] = None
 ) -> Tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset, Dict[int, float]]:
     """Build (train_ds, val_ds, test_ds, class_weights) for `model_name`.
 
     `model_name` is one of {"custom_cnn", "vgg16"}. Images are loaded grayscale from
-    `config.FER_DIR` and resized to that model's `img_size`; class order matches
+    `config.FER_DIR` and resized to that model's `img_size` (or `img_size` if given,
+    e.g. to shrink VGG16 input for a CPU smoke test); class order matches
     `config.CLASS_NAMES`. Training data is augmented; `subset` < 1.0 keeps only that
     fraction of each split, for fast CPU smoke tests. `class_weights` is computed from
     the (post-subset) training labels for use with balanced training.
@@ -68,7 +69,7 @@ def get_datasets(
         raise ValueError(f"Unknown model_name: {model_name!r}")
 
     cfg = CNN if model_name == "custom_cnn" else VGG16
-    img_size = cfg["img_size"]
+    img_size = img_size or cfg["img_size"]
     batch_size = cfg["batch_size"]
     common_kwargs = dict(
         labels="inferred",

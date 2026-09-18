@@ -247,7 +247,7 @@ Write from `docs/experiment_log.md`, the CSVs and `paper/figures/`. Target 15 pa
 ## Progress tracker
 
 - [x] Phase 0 — Environment and repo
-- [ ] Phase 1 — Data pipeline and EDA
+- [x] Phase 1 — Data pipeline and EDA
 - [ ] Phase 2 — Custom CNN trained (`cnn_v1`)
 - [ ] Phase 3 — VGG16 trained (`vgg16_v1`)
 - [ ] Phase 4 — Evaluation and comparison table

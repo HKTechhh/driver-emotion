@@ -27,6 +27,12 @@ NUM_CLASSES = len(CLASS_NAMES)
 SEED = 42
 VAL_SPLIT = 0.15                   # carved from FER2013 train; FER2013 test stays untouched
 
+# "balanced" (sklearn) alone let disgust's weight (~9.5x) destabilize training -- see
+# docs/experiment_log.md. "sqrt" square-roots the balanced weights and caps them at
+# CLASS_WEIGHT_MAX, keeping the imbalance correction without the instability.
+CLASS_WEIGHT_MODE = "sqrt"         # one of "none", "balanced", "sqrt"
+CLASS_WEIGHT_MAX = 3.0
+
 # ---------------------------------------------------------------- Model A: custom CNN (VGG-style kernels)
 CNN = {
     "img_size": 48,

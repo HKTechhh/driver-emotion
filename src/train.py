@@ -9,8 +9,10 @@ from datetime import datetime
 from typing import Optional
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import tensorflow as tf
+from sklearn.metrics import f1_score
 
 from config import (
     CNN,
@@ -56,6 +58,16 @@ def _build_callbacks(run_name: str, monitor: str = "val_accuracy") -> list:
     ]
 
 
+def _val_macro_f1(model: tf.keras.Model, val_ds: tf.data.Dataset) -> float:
+    """Macro-F1 on the validation set. Accuracy alone hides collapse onto majority classes."""
+    y_true, y_pred = [], []
+    for images, labels in val_ds:
+        probs = model.predict(images, verbose=0)
+        y_pred.append(np.argmax(probs, axis=1))
+        y_true.append(labels.numpy())
+    return float(f1_score(np.concatenate(y_true), np.concatenate(y_pred), average="macro", zero_division=0))
+
+
 def _combine_histories(first: dict, second: dict) -> dict:
     """Concatenate two per-epoch `History.history` dicts (stage 1 + stage 2), key-wise."""
     keys = set(first) | set(second)
@@ -84,6 +96,7 @@ def _log_run(
     model_name: str,
     epochs_run: int,
     best_val_acc: float,
+    val_macro_f1: float,
     params: int,
     minutes: float,
     img_size: int,
@@ -97,6 +110,7 @@ def _log_run(
         "date": datetime.now().strftime("%Y-%m-%d"),
         "epochs_run": epochs_run,
         "best_val_acc": best_val_acc,
+        "val_macro_f1": val_macro_f1,
         "params": params,
         "train_minutes": round(minutes, 2),
         "img_size": img_size,
@@ -141,6 +155,7 @@ def train_custom_cnn(args: argparse.Namespace) -> None:
         model_name="custom_cnn",
         epochs_run=len(history.history["loss"]),
         best_val_acc=max(history.history["val_accuracy"]),
+        val_macro_f1=_val_macro_f1(model, val_ds),
         params=count_params(model),
         minutes=minutes,
         img_size=img_size,
@@ -206,6 +221,7 @@ def train_vgg16(args: argparse.Namespace) -> None:
         model_name="vgg16",
         epochs_run=len(combined["loss"]),
         best_val_acc=max(combined["val_accuracy"]),
+        val_macro_f1=_val_macro_f1(model, val_ds),
         params=count_params(model),
         minutes=minutes,
         img_size=img_size,

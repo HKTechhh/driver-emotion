@@ -1,0 +1,3 @@
+run_name,model,date,epochs_run,best_val_acc,val_macro_f1,params,train_minutes,img_size,batch_size,lr
+cnn_v0_buggy,custom_cnn,2026-09-19,32,0.2415234595537185,,4826055,11.55,48,64,0.001
+cnn_check,custom_cnn,2026-09-19,3,0.3975847661495209,0.24088146379174072,4826055,36.8,48,64,0.001

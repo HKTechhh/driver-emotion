@@ -250,6 +250,7 @@ Write from `docs/experiment_log.md`, the CSVs and `paper/figures/`. Target 15 pa
 - [x] Phase 1 — Data pipeline and EDA
 - [x] Phase 2 — Custom CNN trained (`cnn_v1`)
 - [ ] Phase 3 — VGG16 trained (`vgg16_v1`)
+  - [x] Model + two-stage training script ready (`src/models/vgg16_tl.py`, `train_vgg16`); CPU smoke test passed
 - [ ] Phase 4 — Evaluation and comparison table
 - [ ] Phase 5 — Robustness tests
 - [ ] Phase 6 — Grad-CAM

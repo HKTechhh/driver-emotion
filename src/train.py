@@ -167,14 +167,15 @@ def train_custom_cnn(args: argparse.Namespace) -> None:
 def train_vgg16(args: argparse.Namespace) -> None:
     """Train Model B (VGG16) in two stages: frozen ImageNet base, then fine-tune the top block.
 
-    `--epochs`, if given, overrides both `head_epochs` and `finetune_epochs` (used for
-    quick smoke tests that exercise both stages). The same callbacks are reused across
+    `--head-epochs` / `--finetune-epochs`, if given, override `cfg["head_epochs"]` /
+    `cfg["finetune_epochs"]` independently (used for quick smoke tests that exercise
+    both stages without paying for a full run). The same callbacks are reused across
     both `fit()` calls so checkpointing tracks the best epoch across the whole run.
     """
     cfg = dict(VGG16)
     img_size = args.img_size or cfg["img_size"]
-    head_epochs = cfg["head_epochs"] if args.epochs is None else args.epochs
-    finetune_epochs = cfg["finetune_epochs"] if args.epochs is None else args.epochs
+    head_epochs = cfg["head_epochs"] if args.head_epochs is None else args.head_epochs
+    finetune_epochs = cfg["finetune_epochs"] if args.finetune_epochs is None else args.finetune_epochs
 
     train_ds, val_ds, _test_ds, class_weights = get_datasets(
         "vgg16", subset=args.subset, img_size=img_size
@@ -235,7 +236,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train custom_cnn or vgg16 on FER2013.")
     parser.add_argument("--model", choices=["custom_cnn", "vgg16"], required=True)
     parser.add_argument("--subset", type=float, default=1.0, help="Fraction of each split to use.")
-    parser.add_argument("--epochs", type=int, default=None, help="Override cfg epochs.")
+    parser.add_argument("--epochs", type=int, default=None, help="Override cfg epochs (custom_cnn).")
+    parser.add_argument(
+        "--head-epochs", dest="head_epochs", type=int, default=None,
+        help="Override cfg['head_epochs'] (vgg16 stage 1, frozen base).",
+    )
+    parser.add_argument(
+        "--finetune-epochs", dest="finetune_epochs", type=int, default=None,
+        help="Override cfg['finetune_epochs'] (vgg16 stage 2, fine-tune).",
+    )
     parser.add_argument(
         "--img-size", dest="img_size", type=int, default=None, help="Override cfg img_size."
     )

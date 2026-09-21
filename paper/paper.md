@@ -3,8 +3,8 @@ DRAFT STATUS (delete this block before submission)
 - Every number in Sections 3-5 comes from results/*.csv|json and docs/experiment_log.md.
 - TODO(robustness): Section 4.5, the robustness sentences in Sections 5 and 7, and the Abstract are waiting on the
   full robustness run (results/robustness.csv). Nothing in those places is final.
-- TODO(realtime): the real-time app has been checked component by component but NOT run live on a webcam with a
-  person in front of it. Section 3.9 and the limitations say so. If you run it, add the FPS/observations there.
+- TODO(realtime): the real-time app was verified on simulated frames with the trained models (Section 3.9) but NOT run
+  live on a webcam with a person in front of it. If you run it, add the observed FPS and behaviour there.
 - TODO(references): all references were written from memory. Verify each one (authors, year, venue, pages/DOI)
   before submitting, and add the literature that your department expects in Section 2. Formatting (APA vs IEEE,
   page count, template) is not applied yet.
@@ -151,7 +151,7 @@ Both models are re-evaluated on each corrupted copy of the test set and accuracy
 
 **Grad-CAM.** Heat maps are computed from `block4_conv2` (custom CNN, a 6 × 6 map at 48-pixel input) and `block5_conv3` (VGG16, a 14 × 14 map), for the class the model predicted, and overlaid on the face. Because of the compute involved, the figures use a class-balanced 25% subset of the test set (about 1,800 images). We show one example per emotion that both models classify correctly, and six misclassified examples per model, one per true class for the six classes with most errors.
 
-**Real-time pipeline.** The application captures frames with OpenCV, detects faces with MediaPipe's BlazeFace detector [19] (falling back to an OpenCV Haar cascade if MediaPipe is unavailable), crops the largest face with 15% padding, applies the shared preprocessing, predicts, and smooths the class probabilities with a 10-frame moving average. If *angry* or *fear* remains the top class for more than 3 seconds it shows an on-screen prompt. Per-frame output (timestamp, emotion, confidence, FPS) is logged to a CSV; **no image is stored**. *Verification status:* the detection, cropping, preprocessing, prediction, smoothing and drawing steps were exercised on real images with trained checkpoints, and model inference cost is measured (Section 4.4), but the complete loop has not been evaluated live with drivers, so no end-to-end accuracy or frame-rate claim is made for it.
+**Real-time pipeline.** The application captures frames with OpenCV, detects faces with MediaPipe's BlazeFace detector [19] (falling back to an OpenCV Haar cascade if MediaPipe is unavailable), crops the largest face with 15% padding, applies the shared preprocessing, predicts, and smooths the class probabilities with a 10-frame moving average. If *angry* or *fear* remains the top class for more than 3 seconds it shows an on-screen prompt. Per-frame output (timestamp, emotion, confidence, FPS) is logged to a CSV; **no image is stored**. *Verification status:* the full detect-crop-preprocess-predict path was run with the trained checkpoints on *simulated* frames (a test face enlarged six times and placed on a grey 640 × 480 canvas). A face was found in 118 of 120 frames for the custom CNN and 38 of 40 for VGG16. End-to-end accuracy on those frames was 0.669 (CNN, n = 118) and 0.789 (VGG16, n = 38; a small sample), against 0.708 and 0.725 for the same models applied directly to the original 48-pixel images, differences that are within sampling noise at these sample sizes. However, the label produced by the real-time path agreed with the direct label on only 78% (CNN) and 76% (VGG16) of frames: the detector's box plus 15% padding frames the face differently from the tight FER2013 crops the models were trained on, and individual predictions are sensitive to that framing. The complete loop has **not** been evaluated live with drivers or a real camera, so no live accuracy or frame-rate claim is made for it.
 
 ---
 
@@ -262,7 +262,7 @@ None of these was found by inspecting accuracy alone. Sanity checks that did fin
 - **No tuning.** Neither model was tuned; the ranking might change with tuning.
 - **Labels.** FER2013 labels are noisy, which caps attainable accuracy.
 - **Grad-CAM** is qualitative, computed on a subset, with a handful of examples inspected by eye.
-- **Real-time system.** Component-level checks only; no live evaluation with drivers (Section 3.9).
+- **Real-time system.** Checked on simulated frames only, where individual predictions differ from the direct model output about one time in four because of framing (Section 3.9); no live evaluation with drivers or a real camera.
 - **Latency** is for one laptop CPU and model inference only.
 
 ---

@@ -16,6 +16,7 @@ ipykernel
 netron
 visualkeras
 tensorboard
+setuptools<81   # tensorboard 2.20 imports pkg_resources, which setuptools>=81 no longer ships
 
 # optional demo UI (Phase 7)
 streamlit

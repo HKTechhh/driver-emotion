@@ -235,6 +235,8 @@ docs/experiment_log.md      # dated log of every run and decision
 results/                     # CSVs, JSON metrics, figures (mostly gitignored outputs)
 paper/figures/                 # curated final figures for the write-up
 paper/paper.md                  # first draft of the research paper (TODOs marked inside)
+paper/make_figures.py            # pipeline diagram, per-class chart, retained-accuracy chart, combined Grad-CAM
+paper/build_docx.py              # paper.md -> paper.docx (python3 paper/build_docx.py; docx is git-ignored)
 ```
 
 ## Notes

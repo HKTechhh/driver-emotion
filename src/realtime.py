@@ -217,7 +217,7 @@ def process_frame(
         annotated, f"{top_emotion} {confidence * 100:.0f}%", (x, label_y),
         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA,
     )
-    _draw_probability_bars(annotated, smoothed)
+    _draw_probability_bars(annotated, smoothed, origin=(10, banner_height + 10 if alert_triggered else 10))  # keep the bars clear of the alert banner
     cv2.putText(
         annotated, f"FPS: {fps:.1f}", (10, annotated.shape[0] - 10),
         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2, cv2.LINE_AA,

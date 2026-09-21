@@ -76,9 +76,13 @@ Comparisons of FER models usually report clean-test accuracy and stop. We add a 
 
 ## 3. Methodology
 
+Figure 1 summarises the whole study: the offline pipeline that trains and evaluates the two models, and the real-time application that reuses the same preprocessing.
+
+![Figure 1. Overview: (A) training and evaluation, (B) the real-time application. The shared preprocessing module keeps live frames identical to training images.](figures/pipeline.png)
+
 ### 3.1 Data
 
-We used the FER2013 images as distributed in the widely used Kaggle folder version, arranged as one directory per class. The **train** partition has 28,709 images and the **test** partition 7,178 (the latter equals the combined size of the original PublicTest and PrivateTest partitions). Images are 48 × 48, 8-bit grayscale. Class counts are strongly imbalanced (Table 1; Figure 1): *disgust* is about 16.5 times rarer than *happy* in training.
+We used the FER2013 images as distributed in the widely used Kaggle folder version, arranged as one directory per class. The **train** partition has 28,709 images and the **test** partition 7,178 (the latter equals the combined size of the original PublicTest and PrivateTest partitions). Images are 48 × 48, 8-bit grayscale. Class counts are strongly imbalanced (Table 1; Figure 2): *disgust* is about 16.5 times rarer than *happy* in training.
 
 **Table 1.** FER2013 class counts.
 
@@ -93,9 +97,7 @@ We used the FER2013 images as distributed in the widely used Kaggle folder versi
 | surprise | 3,171 | 831 |
 | **Total** | **28,709** | **7,178** |
 
-![Figure 1. Class distribution of FER2013 (train and test).](figures/class_distribution.png)
-
-![Figure 2. Sample faces per class (the first five files of each class in the training partition).](figures/sample_grid.png)
+![Figure 2. FER2013 class distribution (left) and sample faces (right; the first five files of each class in the training partition).](figures/class_distribution.png;figures/sample_grid.png)
 
 A validation set was carved from the training partition (15%, seed 42), giving 24,403 training and 4,306 validation images. The split is by file and is not stratified by class. **The test partition was used only for the final evaluation, and for choosing nothing.** Model selection used the validation set alone.
 
@@ -112,17 +114,32 @@ Training images are augmented with a random horizontal flip, rotation (factor 0.
 
 The custom CNN (4,826,055 parameters) has four VGG-style blocks. Each block is two 3 × 3 convolutions (padding "same", L2 weight decay 10⁻⁴), each followed by batch normalisation and ReLU, then 2 × 2 max-pooling and dropout 0.25. The blocks use 64, 128, 256 and 512 filters. The head is global average pooling, a 256-unit dense layer with batch normalisation, ReLU and dropout 0.4, and a 7-way softmax. Layers are named (`block1_conv1`, …, `block4_conv2`) so that the network reads clearly in a viewer and so that Grad-CAM can target `block4_conv2`. The architecture is drawn in Figure 3.
 
-![Figure 3. Layered view of the custom CNN (batch-norm, ReLU and dropout layers hidden).](figures/custom_cnn_architecture.png)
+![Figure 3. The custom CNN as rendered by the Netron model viewer from the trained checkpoint `cnn_v1.keras`. Read the four columns left to right; each node shows the layer type and its weight shapes.](figures/netron_cnn_v1.png)
 
 ### 3.4 Model B: VGG16 with two-stage transfer learning
 
 Model B (14,980,935 parameters) is Keras' VGG16 with ImageNet weights and no top, followed by global average pooling, a 512-unit ReLU dense layer, dropout 0.5 and a 7-way softmax (Figure 4). Training has two stages. **Stage 1** (15 epochs, learning rate 10⁻³) trains only the new head with the convolutional base frozen (266,247 trainable parameters). **Stage 2** (25 epochs, learning rate 10⁻⁵) unfreezes the last convolutional block (`block5_conv1` onward) and fine-tunes it together with the head. Layers up to `block4_pool` remain frozen throughout.
 
-![Figure 4. Layered view of the VGG16-based model.](figures/vgg16_architecture.png)
+![Figure 4. VGG16 with the new head as rendered by Netron from `vgg16_v1.keras` (13 convolutions, 5 poolings, global average pooling, a 512-unit dense layer, dropout, and the 7-way output). Read left to right.](figures/netron_vgg16_v1.png){5.6}
 
 ### 3.5 Training protocol
 
-Both models use Adam [16] and sparse categorical cross-entropy, with class weights (Section 3.6). Callbacks are shared: the checkpoint with the best **validation** accuracy is kept; early stopping (patience 10, restore best weights); `ReduceLROnPlateau` on validation accuracy (factor 0.5, patience 4). The custom CNN used batch size 64 and a maximum of 60 epochs from a learning rate of 10⁻³; VGG16 used batch size 32 and the two stages above. Random seeds were fixed (seed 42) for Python, NumPy and TensorFlow, but the GPU kernels are not bit-wise deterministic, and **each model was trained once**, so run-to-run variation is not measured. Training was done on a Kaggle NVIDIA T4 GPU (custom CNN: 21.5 min; VGG16: 123.4 min). Software: Python 3.11.15, TensorFlow 2.20 / Keras 3.15 for the local evaluation.
+Table 2 lists the setup. Both models use Adam [16] and sparse categorical cross-entropy, with class weights (Section 3.6). Callbacks are shared: the checkpoint with the best **validation** accuracy is kept; early stopping (patience 10, restore best weights); `ReduceLROnPlateau` on validation accuracy (factor 0.5, patience 4). The custom CNN used batch size 64 and a maximum of 60 epochs from a learning rate of 10⁻³; VGG16 used batch size 32 and the two stages above. Random seeds were fixed (seed 42) for Python, NumPy and TensorFlow, but the GPU kernels are not bit-wise deterministic, and **each model was trained once**, so run-to-run variation is not measured. Training was done on a Kaggle NVIDIA T4 GPU (custom CNN: 21.5 min; VGG16: 123.4 min). Software: Python 3.11.15, TensorFlow 2.20 / Keras 3.15 for the local evaluation.
+
+**Table 2.** Training setup for the two models.
+
+| Setting | Custom CNN | VGG16 (fine-tuned) |
+|---|---|---|
+| Input | 48 × 48 × 1, scaled to [0, 1] | 224 × 224 × 3, VGG16 `preprocess_input` |
+| Parameters | 4,826,055 | 14,980,935 |
+| Optimiser, learning rate | Adam, 10⁻³ | Adam, 10⁻³ (stage 1), 10⁻⁵ (stage 2) |
+| Batch size | 64 | 32 |
+| Epochs run | 60 | 15 + 25 = 40 |
+| Regularisation | L2 10⁻⁴ (conv), dropout 0.25 per block and 0.4 in the head, batch norm | dropout 0.5 in the head |
+| Schedule / stopping | LR halved after 4 epochs without val-accuracy gain; early-stop patience 10 | same |
+| Class weights | square root of balanced, capped at 3.0 | same |
+| Augmentation | flip, rotation ±18°, zoom 10%, brightness ±20%, contrast ±20% | same |
+| Hardware, time | Kaggle T4 GPU, 21.5 min | Kaggle T4 GPU, 123.4 min |
 
 ### 3.6 Handling class imbalance
 
@@ -134,7 +151,9 @@ On the full test partition we report accuracy, macro-F1 (the unweighted mean of 
 
 ### 3.8 Robustness protocol
 
-To probe RQ2, six conditions are applied to *every* test image (7,178), deterministically (seeded generator), at native 48 × 48 resolution before the model-specific resize:
+To probe RQ2, six conditions are applied to *every* test image (7,178), deterministically (seeded generator), at native 48 × 48 resolution before the model-specific resize (Table 3; example images in Figure 11):
+
+**Table 3.** Simulated driving conditions (each applied to every test image, seeded).
 
 | Condition | Simulation |
 |---|---|
@@ -159,16 +178,19 @@ Both models are re-evaluated on each corrupted copy of the test set and accuracy
 
 ### 4.1 Training behaviour
 
-The custom CNN was trained for the full 60 epochs; its best validation accuracy of **0.6665** occurred at epoch 59. The learning rate was halved six times by `ReduceLROnPlateau` (at epochs 11, 24, 30, 38, 48 and 55), from 10⁻³ to 1.6 × 10⁻⁵. Validation loss reached its minimum (1.092) at epoch 32 and stayed near 1.12 afterwards, and validation accuracy gained only about one point over the last twenty epochs, while training accuracy kept rising to 77%: a moderate generalisation gap, not runaway overfitting (Figure 5).
+Figures 5 and 6 show the training curves. The custom CNN was trained for the full 60 epochs; its best validation accuracy of **0.6665** occurred at epoch 59. The learning rate was halved six times by `ReduceLROnPlateau` (at epochs 11, 24, 30, 38, 48 and 55), from 10⁻³ to 1.6 × 10⁻⁵. Validation loss reached its minimum (1.092) at epoch 32 and stayed near 1.12 afterwards, and validation accuracy gained only about one point over the last twenty epochs, while training accuracy kept rising to 77%: a moderate generalisation gap, not runaway overfitting (Figure 5).
 
 VGG16's frozen-base stage plateaued at about 48–50% validation accuracy (50.1% at the end of stage 1). Unfreezing the last block produced an immediate jump (55.4% in the first fine-tuning epoch) and a best validation accuracy of **0.6600** at epoch 38 of 40. From about epoch 20, its validation loss flattens near 1.0 while training loss keeps falling (73.6% training vs. 65.7% validation at the end), so it overfits somewhat more than the custom CNN (Figure 5).
 
-![Figure 5. Training curves. Left: custom CNN. Right: VGG16 (dashed line: start of fine-tuning).](figures/cnn_v1_curves.png)
-![](figures/vgg16_v1_curves.png)
+![Figure 5. Training curves. Left: custom CNN. Right: VGG16 (dashed line: start of fine-tuning).](figures/cnn_v1_curves.png;figures/vgg16_v1_curves.png)
+
+![Figure 6. TensorBoard view of the same per-epoch values (smoothing off): accuracy (left) and loss (right), training and validation, both models. The original TensorBoard event files of the Kaggle runs were not exported, so this view was regenerated from the per-epoch history files with `src/export_tensorboard.py`; the plotted values are identical to the CSVs.](figures/tensorboard_curves.png)
 
 ### 4.2 Test-set performance
 
-**Table 2.** Test-set results (7,178 images; the test set was not used for any selection).
+Table 4 gives the headline results, Table 5 their uncertainty and the paired comparison, and Figure 7 summarises accuracy, macro-F1 and speed.
+
+**Table 4.** Test-set results (7,178 images; the test set was not used for any selection).
 
 | | Custom CNN | VGG16 (fine-tuned) |
 |---|---|---|
@@ -183,9 +205,18 @@ VGG16's frozen-base stage plateaued at about 48–50% validation accuracy (50.1%
 
 Test accuracy is close to validation accuracy for both models (0.6753 vs 0.6665; 0.6581 vs 0.6600), which indicates that selecting the checkpoint on validation data did not overfit to it. The custom CNN is better on every metric: about 1.7 percentage points more accurate, 5.4 times faster, and half the size. Is a 1.7-point gap more than test-sample noise? Bootstrap 95% intervals (Section 3.7) for accuracy are 0.663–0.686 for the CNN and 0.647–0.670 for VGG16, and for macro-F1 0.644–0.673 and 0.625–0.654. These intervals overlap, but both models are scored on the same images and make correlated errors, so the appropriate comparison is a paired one. The paired accuracy difference is 1.71 points (95% CI 0.70 to 2.76) and the paired macro-F1 difference is 1.98 points (95% CI 0.67 to 3.28); both intervals exclude zero. Of the images on which the two models disagree, the CNN is right on 795 and VGG16 on 672 (both are right on 4,052 and both wrong on 1,659), and an exact McNemar test gives *p* = 0.0014. The custom CNN's advantage is therefore small but unlikely to be test-sample noise. Two limits apply. Each model was trained once, and the bootstrap resamples test images only, so it does not capture variation between training runs; another seed could move either model by an amount we have not measured. And a difference of under two points carries little practical weight next to the fivefold difference in speed.
 
+**Table 5.** Bootstrap 95% confidence intervals and the paired comparison (2,000 resamples of the 7,178 test images; exact McNemar *p* = 0.0014; correct for the CNN only: 795 images, for VGG16 only: 672).
+
+| Measure | Custom CNN [95% CI] | VGG16 [95% CI] | Paired difference, CNN − VGG16 [95% CI] |
+|---|---|---|---|
+| Accuracy | 0.675 [0.663, 0.686] | 0.658 [0.647, 0.670] | +1.71 points [+0.70, +2.76] |
+| Macro-F1 | 0.659 [0.644, 0.673] | 0.640 [0.625, 0.654] | +1.98 points [+0.67, +3.28] |
+
+![Figure 7. Accuracy and macro-F1 (left axis) and inference speed (right axis).](figures/comparison.png){4.4}
+
 ### 4.3 Per-class behaviour
 
-**Table 3.** Per-class precision (P), recall (R) and F1 on the test set.
+**Table 6.** Per-class precision (P), recall (R) and F1 on the test set.
 
 | Class | Support | CNN P | CNN R | CNN F1 | VGG16 P | VGG16 R | VGG16 F1 |
 |---|---|---|---|---|---|---|---|
@@ -197,23 +228,23 @@ Test accuracy is close to validation accuracy for both models (0.6753 vs 0.6665;
 | sad | 1247 | 0.561 | 0.509 | 0.534 | 0.517 | 0.559 | 0.537 |
 | surprise | 831 | 0.782 | 0.795 | 0.789 | 0.768 | 0.779 | 0.773 |
 
-Both models find *happy* (F1 0.86–0.88) and *surprise* (0.77–0.79) easiest and *fear* and *sad* hardest. Apart from *fear*, the two models are within about two points of each other on every class. *Fear* is the exception: VGG16's recall is 0.331 against the CNN's 0.487, so VGG16 misses about two thirds of the fearful faces. Since *fear* is one of the two alert emotions in the application, this matters for the intended use. *Disgust*, the rarest class, is recognised with recall 0.70 (CNN) and 0.62 (VGG16), which suggests that the capped class weights did their job. The main confusions of the custom CNN (row-normalised, Figure 6) are *sad* predicted as *neutral* (22%), *fear* as *sad* (17%), *disgust* as *angry* (14%) and *angry* as *sad* (13%), which are confusions between visually similar, low-intensity negative expressions.
+![Figure 8. Per-class F1 (left) and recall (right) on the test set.](figures/per_class_f1_recall.png)
 
-![Figure 6. Row-normalised confusion matrix, custom CNN.](figures/cnn_v1_confusion_matrix_normalized.png)
+Both models find *happy* (F1 0.86–0.88) and *surprise* (0.77–0.79) easiest and *fear* and *sad* hardest. Apart from *fear*, the two models are within about two points of each other on every class. *Fear* is the exception: VGG16's recall is 0.331 against the CNN's 0.487, so VGG16 misses about two thirds of the fearful faces. Since *fear* is one of the two alert emotions in the application, this matters for the intended use. *Disgust*, the rarest class, is recognised with recall 0.70 (CNN) and 0.62 (VGG16), which suggests that the capped class weights did their job. The main confusions of the custom CNN (row-normalised, Figure 9) are *sad* predicted as *neutral* (22%), *fear* as *sad* (17%), *disgust* as *angry* (14%) and *angry* as *sad* (13%), which are confusions between visually similar, low-intensity negative expressions.
 
-![Figure 7. Row-normalised confusion matrix, VGG16.](figures/vgg16_v1_confusion_matrix_normalized.png)
+![Figure 9. Row-normalised confusion matrices on the test set. Left: custom CNN. Right: VGG16.](figures/cnn_v1_confusion_matrix_normalized.png;figures/vgg16_v1_confusion_matrix_normalized.png)
 
-![Figure 8. Accuracy and macro-F1 (left axis) and inference speed (right axis).](figures/comparison.png)
+### 4.4 Computational cost and the real-time application
 
-### 4.4 Computational cost
+On the development CPU the custom CNN runs at about 25 frames per second for the model alone, VGG16 at about 4.6. Live video also needs face detection, cropping and drawing, so end-to-end frame rates will be lower than these model-only figures. The 25 FPS figure is an upper bound for this pipeline on this laptop, not a measurement of the live application. Figure 10 shows what the application displays, produced by the application's own frame-processing code with the trained custom CNN on simulated webcam frames (real test faces placed on a 640 × 480 canvas); the frame rate printed on each frame is the measured speed of that single call on the development laptop.
 
-On the development CPU the custom CNN runs at about 25 frames per second for the model alone, VGG16 at about 4.6. Live video also needs face detection, cropping and drawing, so end-to-end frame rates will be lower than these model-only figures. The 25 FPS figure is an upper bound for this pipeline on this laptop, not a measurement of the live application.
+![Figure 10. Output of the real-time pipeline on simulated frames (not a live camera session): bounding box, top emotion, per-class probability bars and frame rate; the alert banner (alert delay set to 0 s purely to illustrate it; the default is 3 s); and the message shown when no face is found.](figures/realtime_demo.png){5.2}
 
 ### 4.5 Robustness under simulated driving conditions
 
-Both models were evaluated on all 7,178 test images under each of the six conditions (Table 4, Figures 9 and 10). As a check on the harness, the `clean` row reproduces the separately measured test accuracies to within 0.3 points (0.676 vs 0.675 for the CNN; 0.655 vs 0.658 for VGG16).
+Both models were evaluated on all 7,178 test images under each of the six conditions (Table 7, Figures 11 to 13). As a check on the harness, the `clean` row reproduces the separately measured test accuracies to within 0.3 points (0.676 vs 0.675 for the CNN; 0.655 vs 0.658 for VGG16).
 
-**Table 4.** Accuracy and macro-F1 under simulated driving conditions, and the accuracy lost relative to `clean` (percentage points).
+**Table 7.** Accuracy and macro-F1 under simulated driving conditions, and the accuracy lost relative to `clean` (percentage points).
 
 | Condition | CNN acc | CNN macro-F1 | CNN acc lost | VGG16 acc | VGG16 macro-F1 | VGG16 acc lost |
 |---|---|---|---|---|---|---|
@@ -224,9 +255,11 @@ Both models were evaluated on all 7,178 test images under each of the six condit
 | occlusion | 0.444 | 0.368 | 23.2 | 0.396 | 0.273 | 25.9 |
 | head_pose | 0.668 | 0.645 | 0.8 | 0.634 | 0.616 | 2.2 |
 
-![Figure 9. Accuracy and macro-F1 under each condition.](figures/robustness.png)
+![Figure 11. One example face under each condition.](figures/conditions_grid.png)
 
-![Figure 10. One example face under each condition.](figures/conditions_grid.png)
+![Figure 12. Accuracy and macro-F1 under each condition.](figures/robustness.png)
+
+![Figure 13. Share of its own clean accuracy that each model keeps under each condition.](figures/robustness_retained.png){4.6}
 
 Three findings stand out.
 
@@ -238,15 +271,11 @@ These results are for one severity level per condition on simulated versions of 
 
 ### 4.6 What the networks look at (Grad-CAM)
 
-![Figure 11. Grad-CAM for one correctly classified example per emotion: original, custom CNN, VGG16.](figures/gradcam_grid.png)
+**Correct predictions (Figure 14, left).** Both networks concentrate on facial features: the mouth for *happy*, the brows and eyes for *sad* and *fear*, the nose and mouth for *disgust*, and the eyes and mouth for *angry*. In none of the seven examples is the main evidence in the background. Two weaknesses are visible: the CNN's map for *surprise* is a vague horizontal band across the whole width, and both models look at the lower face rather than the eyes for *neutral*. The CNN's maps are blobbier because its last convolutional layer is only 6 × 6 at this input size; VGG16's 14 × 14 maps are sharper.
 
-**Correct predictions (Figure 11).** Both networks concentrate on facial features: the mouth for *happy*, the brows and eyes for *sad* and *fear*, the nose and mouth for *disgust*, and the eyes and mouth for *angry*. In none of the seven examples is the main evidence in the background. Two weaknesses are visible: the CNN's map for *surprise* is a vague horizontal band across the whole width, and both models look at the lower face rather than the eyes for *neutral*. The CNN's maps are blobbier because its last convolutional layer is only 6 × 6 at this input size; VGG16's 14 × 14 maps are sharper.
+**Errors (Figure 14, right).** The custom CNN's hot spots in its errors mostly stay on the face (nose bridge, mouth, brows, cheeks), with two of six uncertain (hair and a region at the image edge). For VGG16, four of the six sampled errors have their main hot spot away from the expressive regions: the hair-line and a hand, a frame edge, a bottom corner, and a baseball cap. In one *surprise* error, VGG16 looks only at the mouth and ignores the wide-open eyes. This is consistent with VGG16's weaker *fear* recall, but it is a qualitative impression from a handful of hand-inspected images, and Grad-CAM shows where the gradient signal lies and not what the model "relies on".
 
-**Errors (Figures 12 and 13).** The custom CNN's hot spots in its errors mostly stay on the face (nose bridge, mouth, brows, cheeks), with two of six uncertain (hair and a region at the image edge). For VGG16, four of the six sampled errors have their main hot spot away from the expressive regions: the hair-line and a hand, a frame edge, a bottom corner, and a baseball cap. In one *surprise* error, VGG16 looks only at the mouth and ignores the wide-open eyes. This is consistent with VGG16's weaker *fear* recall, but it is a qualitative impression from a handful of hand-inspected images, and Grad-CAM shows where the gradient signal lies and not what the model "relies on".
-
-![Figure 12. Misclassified examples, custom CNN (one per true class).](figures/gradcam_misclassified_custom_cnn.png)
-
-![Figure 13. Misclassified examples, VGG16 (one per true class).](figures/gradcam_misclassified_vgg16.png)
+![Figure 14. Grad-CAM. Left: one correctly classified example per emotion (original, custom CNN, VGG16). Right: misclassified examples, one per true class, for the custom CNN (top) and VGG16 (bottom).](figures/gradcam_combined.png)
 
 ---
 

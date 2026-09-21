@@ -11,3 +11,6 @@ logs/
 .DS_Store
 .env
 kaggle.json
+
+# generated from paper/paper.md by paper/build_docx.py
+paper/paper.docx

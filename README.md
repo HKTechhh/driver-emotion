@@ -11,9 +11,36 @@ comparative study of two architectures on FER2013 (7 emotion classes):
 The full build plan, phase by phase, is in [`PLAN.md`](PLAN.md). Project rules and
 coding conventions are in [`.cursor/rules/project.mdc`](.cursor/rules/project.mdc).
 
-**Status:** code for Phases 0–8 is complete. Phases 2–9 (trained checkpoints, final
-metrics, frozen results) are in progress — see the progress tracker at the bottom of
-`PLAN.md` for what's ticked so far.
+**Status:** models trained, evaluated, stress-tested and explained; paper drafted. The
+remaining items need a person, not a computer: the live webcam run of the real-time app,
+the Netron / TensorBoard / app screenshots, and verifying the paper's references. See
+`PLAN.md` (progress tracker) and `docs/experiment_log.md` (every run, decision and bug).
+
+## Results (FER2013, full 7,178-image test set)
+
+| | Custom CNN (`cnn_v1`) | VGG16 (`vgg16_v1`) |
+|---|---|---|
+| Test accuracy | **0.6753** | 0.6581 |
+| Macro-F1 | **0.6595** | 0.6397 |
+| Parameters / file size | 4.83 M / 55.4 MiB | 14.98 M / 113.3 MiB |
+| Latency, laptop CPU, 1 image | 39.9 ms (25 FPS) | 216.2 ms (4.6 FPS) |
+
+Accuracy under simulated driving conditions (full test set):
+
+| Condition | CNN | VGG16 |
+|---|---|---|
+| clean | 0.676 | 0.655 |
+| low light | 0.286 | 0.218 |
+| glare | 0.515 | 0.478 |
+| motion blur | 0.441 | 0.286 |
+| occlusion | 0.444 | 0.396 |
+| head rotation (±20°) | 0.668 | 0.634 |
+
+Read these with the caveats in mind: FER2013 is web images, not in-cabin footage; the
+degradations are synthetic; each model was trained once; and low light collapses both
+models (the CNN's 28.6% is only ~4 points above always answering *happy*). The
+real-time app has been verified on simulated frames but not yet live. Details, per-class
+results and the failure analysis are in `docs/experiment_log.md` and `paper/paper.md`.
 
 ## Setup
 
@@ -81,6 +108,7 @@ jupyter notebook notebooks/01_eda.ipynb   # class counts, sample grid, image siz
 ```bash
 # CPU smoke test (~1 min)
 python -m src.train --model custom_cnn --subset 0.02 --epochs 2
+python -m src.train --model vgg16 --subset 0.02 --img-size 96 --head-epochs 1 --finetune-epochs 1
 
 # Full run — do this on a GPU (Colab/Kaggle), not a laptop CPU
 python -m src.train --model custom_cnn --run-name cnn_v1
@@ -91,7 +119,8 @@ python -m src.train --model vgg16 --run-name vgg16_v1
 |---|---|
 | `--model {custom_cnn,vgg16}` | which architecture to train (required) |
 | `--subset FLOAT` | fraction of each data split to use (default `1.0`) |
-| `--epochs INT` | override the config's epoch count (for `vgg16`, overrides *both* the frozen-head and fine-tune stage lengths) |
+| `--epochs INT` | override the config's epoch count (`custom_cnn` only) |
+| `--head-epochs INT` / `--finetune-epochs INT` | override the two `vgg16` stage lengths independently (frozen-base stage / fine-tune stage) |
 | `--img-size INT` | override the config's input resolution (e.g. `--img-size 96` to smoke-test VGG16 on a CPU) |
 | `--run-name NAME` | defaults to `{model}_{timestamp}`; controls every output filename |
 
@@ -145,6 +174,16 @@ Saves `results/figures/gradcam_grid.png` (one correctly classified example per
 emotion, original vs. each model's Grad-CAM) and a misclassified-examples grid per
 model.
 
+### Is the CNN-vs-VGG16 gap real? (`src/significance.py`)
+
+```bash
+python -m src.significance --cnn-model-path models/cnn_v1.keras --vgg16-model-path models/vgg16_v1.keras
+```
+
+Saves per-image predictions (`results/predictions_*.csv`) and writes
+`results/significance.json`: bootstrap 95% confidence intervals, a paired bootstrap for the
+accuracy difference, and an exact McNemar test.
+
 ### Architecture diagrams (`src/plot_architecture.py`)
 
 ```bash
@@ -184,6 +223,7 @@ src/
   compare.py               # aggregates metrics into one comparison table/chart
   robustness.py            # accuracy under simulated driving conditions
   gradcam.py                # Grad-CAM explainability grids
+  significance.py             # bootstrap CIs + McNemar test for the CNN-vs-VGG16 gap
   plot_architecture.py       # visualkeras architecture diagrams
   realtime.py                # live webcam driver-emotion app
   models/
@@ -194,6 +234,7 @@ tests/                     # pytest
 docs/experiment_log.md      # dated log of every run and decision
 results/                     # CSVs, JSON metrics, figures (mostly gitignored outputs)
 paper/figures/                 # curated final figures for the write-up
+paper/paper.md                  # first draft of the research paper (TODOs marked inside)
 ```
 
 ## Notes

@@ -211,21 +211,42 @@ On the development CPU the custom CNN runs at about 25 frames per second for the
 
 ### 4.5 Robustness under simulated driving conditions
 
-*TODO(robustness): fill from results/robustness.csv when the full run finishes. Report a table of accuracy and macro-F1 per condition for both models, the drop relative to `clean`, and which model degrades less under each condition. Figures: `robustness.png` (line chart) and `conditions_grid.png` (one example per condition).*
+Both models were evaluated on all 7,178 test images under each of the six conditions (Table 4, Figures 9 and 10). As a check on the harness, the `clean` row reproduces the separately measured test accuracies to within 0.3 points (0.676 vs 0.675 for the CNN; 0.655 vs 0.658 for VGG16).
 
-Partial results (three of six conditions, full test set) are logged and will be replaced by the final table: clean 0.676 / 0.655 (CNN / VGG16), low_light 0.286 / 0.218, glare 0.515 / 0.478.
+**Table 4.** Accuracy and macro-F1 under simulated driving conditions, and the accuracy lost relative to `clean` (percentage points).
+
+| Condition | CNN acc | CNN macro-F1 | CNN acc lost | VGG16 acc | VGG16 macro-F1 | VGG16 acc lost |
+|---|---|---|---|---|---|---|
+| clean | 0.676 | 0.657 | — | 0.655 | 0.635 | — |
+| low_light | 0.286 | 0.137 | 39.0 | 0.218 | 0.115 | 43.7 |
+| glare | 0.515 | 0.466 | 16.1 | 0.478 | 0.424 | 17.7 |
+| motion_blur | 0.441 | 0.332 | 23.5 | 0.286 | 0.157 | 37.0 |
+| occlusion | 0.444 | 0.368 | 23.2 | 0.396 | 0.273 | 25.9 |
+| head_pose | 0.668 | 0.645 | 0.8 | 0.634 | 0.616 | 2.2 |
+
+![Figure 9. Accuracy and macro-F1 under each condition.](figures/robustness.png)
+
+![Figure 10. One example face under each condition.](figures/conditions_grid.png)
+
+Three findings stand out.
+
+1. **The custom CNN degrades less than VGG16 under every corruption**, but by very different amounts: 13.5 points for motion blur, 4.8 for low light, 2.7 for occlusion, 1.6 for glare and 1.4 for head rotation. Only the motion-blur gap is large; the glare and head-rotation gaps are small and should not be over-read (no confidence intervals were computed for the corrupted results). Under motion blur VGG16 almost collapses (macro-F1 0.157) while the CNN keeps 65% of its clean accuracy.
+2. **Low light is by far the most damaging condition for both models.** The CNN keeps 42% of its clean accuracy and VGG16 33%. To put the absolute numbers in context, always predicting the most frequent class (*happy*, 24.7% of the test set) would score 24.7%: the CNN's 28.6% is only about four points above that, and VGG16's 21.8% is below it. Their macro-F1 of 0.14 and 0.12 indicate that predictions concentrate on a few classes. We did not analyse which classes they collapse onto. Neither model, as trained, is usable in this condition.
+3. **In-plane head rotation of ±20° is almost harmless** (0.8 and 2.2 points). This is unsurprising, because training augmentation already includes rotations of up to about 18°. By contrast, the augmentation brightness range (±20%) is far weaker than the ×0.4 dimming used here, and blur, glare and occlusion were not in the training augmentation at all.
+
+These results are for one severity level per condition on simulated versions of clean 48-pixel web images, and each model was trained once.
 
 ### 4.6 What the networks look at (Grad-CAM)
 
-![Figure 9. Grad-CAM for one correctly classified example per emotion: original, custom CNN, VGG16.](figures/gradcam_grid.png)
+![Figure 11. Grad-CAM for one correctly classified example per emotion: original, custom CNN, VGG16.](figures/gradcam_grid.png)
 
-**Correct predictions (Figure 9).** Both networks concentrate on facial features: the mouth for *happy*, the brows and eyes for *sad* and *fear*, the nose and mouth for *disgust*, and the eyes and mouth for *angry*. In none of the seven examples is the main evidence in the background. Two weaknesses are visible: the CNN's map for *surprise* is a vague horizontal band across the whole width, and both models look at the lower face rather than the eyes for *neutral*. The CNN's maps are blobbier because its last convolutional layer is only 6 × 6 at this input size; VGG16's 14 × 14 maps are sharper.
+**Correct predictions (Figure 11).** Both networks concentrate on facial features: the mouth for *happy*, the brows and eyes for *sad* and *fear*, the nose and mouth for *disgust*, and the eyes and mouth for *angry*. In none of the seven examples is the main evidence in the background. Two weaknesses are visible: the CNN's map for *surprise* is a vague horizontal band across the whole width, and both models look at the lower face rather than the eyes for *neutral*. The CNN's maps are blobbier because its last convolutional layer is only 6 × 6 at this input size; VGG16's 14 × 14 maps are sharper.
 
-**Errors (Figures 10 and 11).** The custom CNN's hot spots in its errors mostly stay on the face (nose bridge, mouth, brows, cheeks), with two of six uncertain (hair and a region at the image edge). For VGG16, four of the six sampled errors have their main hot spot away from the expressive regions: the hair-line and a hand, a frame edge, a bottom corner, and a baseball cap. In one *surprise* error, VGG16 looks only at the mouth and ignores the wide-open eyes. This is consistent with VGG16's weaker *fear* recall, but it is a qualitative impression from a handful of hand-inspected images, and Grad-CAM shows where the gradient signal lies and not what the model "relies on".
+**Errors (Figures 12 and 13).** The custom CNN's hot spots in its errors mostly stay on the face (nose bridge, mouth, brows, cheeks), with two of six uncertain (hair and a region at the image edge). For VGG16, four of the six sampled errors have their main hot spot away from the expressive regions: the hair-line and a hand, a frame edge, a bottom corner, and a baseball cap. In one *surprise* error, VGG16 looks only at the mouth and ignores the wide-open eyes. This is consistent with VGG16's weaker *fear* recall, but it is a qualitative impression from a handful of hand-inspected images, and Grad-CAM shows where the gradient signal lies and not what the model "relies on".
 
-![Figure 10. Misclassified examples, custom CNN (one per true class).](figures/gradcam_misclassified_custom_cnn.png)
+![Figure 12. Misclassified examples, custom CNN (one per true class).](figures/gradcam_misclassified_custom_cnn.png)
 
-![Figure 11. Misclassified examples, VGG16 (one per true class).](figures/gradcam_misclassified_vgg16.png)
+![Figure 13. Misclassified examples, VGG16 (one per true class).](figures/gradcam_misclassified_vgg16.png)
 
 ---
 
@@ -237,11 +258,11 @@ The main finding is negative for transfer learning: a 4.8 M-parameter network tr
 
 ### 5.2 Which model suits a vehicle
 
-On the evidence here, the custom CNN is the better fit for an in-vehicle system: equal or better accuracy, a much lower computational cost, and a smaller file. VGG16's cost is a real disadvantage on modest hardware (4.6 FPS on our CPU), and it is the worse model on *fear*, an alert emotion. This conclusion is specific to FER2013-like data and to CPU inference; a GPU or accelerator would narrow the speed gap, though not the model-size gap.
+On the evidence here, the custom CNN is the better fit for an in-vehicle system: equal or better accuracy, a much lower computational cost, and a smaller file. VGG16's cost is a real disadvantage on modest hardware (4.6 FPS on our CPU), and it is the worse model on *fear*, an alert emotion. It is also the more robust of the two under every simulated driving condition (Section 4.5), although neither model is usable in low light as trained; a real system would need a near-infrared camera, low-light augmentation, or both. This conclusion is specific to FER2013-like data and to CPU inference; a GPU or accelerator would narrow the speed gap, though not the model-size gap.
 
 ### 5.3 Failure cases
 
-The dominant errors are between visually similar, low-intensity negative expressions (*sad*↔*neutral*, *fear*→*sad*, *angry*→*sad*), which is also where human annotators disagree on FER2013. Some of the "errors" are probably label noise and not model failure. *TODO(robustness): add the failure analysis under low light, glare, blur, occlusion and rotation once those results are final.*
+The dominant errors are between visually similar, low-intensity negative expressions (*sad*↔*neutral*, *fear*→*sad*, *angry*→*sad*), which is also where human annotators disagree on FER2013. Some of the "errors" are probably label noise and not model failure. Under the simulated driving conditions the failures are of a different kind: the models lose most of their accuracy when the image loses information (darkness with noise, heavy blur, a covered fifth of the face), and lose very little when the face is merely rotated. We can only offer hypotheses for why VGG16 suffers more from blur (Section 4.5): its fine-tuned filters may depend more on fine detail, or the mismatch between its training inputs (enlarged 48-pixel images) and blurred ones may matter more for a network whose first layers were tuned on sharp ImageNet photographs. Neither was tested. What the results do show is that robustness gains are more likely to come from *training* on the relevant corruptions (brightness, blur, glare and occlusion augmentation) than from a larger network.
 
 ### 5.4 Pitfalls that produced plausible but wrong numbers
 

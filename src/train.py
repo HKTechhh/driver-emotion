@@ -6,6 +6,7 @@ Run as a module from the repo root, e.g.:
 import argparse
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -66,6 +67,22 @@ def _val_macro_f1(model: tf.keras.Model, val_ds: tf.data.Dataset) -> float:
         y_pred.append(np.argmax(probs, axis=1))
         y_true.append(labels.numpy())
     return float(f1_score(np.concatenate(y_true), np.concatenate(y_pred), average="macro", zero_division=0))
+
+
+def _remove_stale_history(run_name: str, results_dir: Path = RESULTS_DIR) -> bool:
+    """Delete `{run_name}_history.csv` left over from an earlier run with the same name.
+
+    The CSVLogger appends (so vgg16's two `fit()` calls share one file), which means a
+    re-used run name silently stacks runs: the Kaggle `vgg16_v1_history.csv` came back with
+    three 40-epoch runs in it. Called once, before training starts. Returns True if a file
+    was removed.
+    """
+    history_path = results_dir / f"{run_name}_history.csv"
+    if not history_path.exists():
+        return False
+    history_path.unlink()
+    print(f"Removed stale {history_path.name} from an earlier run named '{run_name}'.")
+    return True
 
 
 def _combine_histories(first: dict, second: dict) -> dict:
@@ -263,6 +280,8 @@ def main() -> None:
     if args.run_name is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         args.run_name = f"{args.model}_{timestamp}"
+
+    _remove_stale_history(args.run_name)
 
     if args.model == "custom_cnn":
         train_custom_cnn(args)

@@ -16,6 +16,7 @@ from PIL import Image
 from sklearn.metrics import classification_report
 
 from config import CLASS_NAMES, FER_DIR, FIGURES_DIR, NUM_CLASSES, RESULTS_DIR, ROBUSTNESS_CONDITIONS, SEED
+from src.preprocess import preprocess
 from src.utils import ensure_dirs, set_seed
 
 
@@ -108,29 +109,35 @@ def _corrupt_batch(images: np.ndarray, condition: str) -> np.ndarray:
 
 
 def _preprocess_for_model(images: np.ndarray, model_name: str, img_size: int) -> np.ndarray:
-    """Resize/convert corrupted uint8 grayscale images to one model's expected input, matching src/data.py.
+    """Resize/convert corrupted uint8 grayscale images to one model's expected input, exactly as in training.
+
+    Training resizes with `tf.image.resize` (bilinear) inside `image_dataset_from_directory`
+    and then applies `src.preprocess`, so this does the same. An earlier version used
+    `cv2.resize(..., INTER_AREA)`, which acts like nearest-neighbour when enlarging 48->224:
+    the blocky images dropped `vgg16_v1` from 0.66 to 0.18 accuracy on *clean* faces.
 
     `img_size` is read from the loaded model's own input shape (see `_evaluate_condition`)
     rather than from config, so this stays correct for a model trained with `--img-size`.
     """
-    resized = np.stack(
-        [cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_AREA) for img in images]
-    )
-
-    if model_name == "custom_cnn":
-        return (resized.astype(np.float32) / 255.0)[..., np.newaxis]
-
-    rgb = np.repeat(resized[..., np.newaxis], 3, axis=-1).astype(np.float32)
-    return np.asarray(tf.keras.applications.vgg16.preprocess_input(rgb))
+    resized = tf.image.resize(images[..., np.newaxis].astype(np.float32), (img_size, img_size), method="bilinear")
+    return preprocess(resized, model_name).numpy()
 
 
 def _evaluate_condition(
-    model: tf.keras.Model, model_name: str, images: np.ndarray, labels: np.ndarray
+    model: tf.keras.Model, model_name: str, images: np.ndarray, labels: np.ndarray, chunk_size: int = 256
 ) -> Tuple[float, float]:
-    """Return (accuracy, macro_f1) for `model` on an already-corrupted image batch."""
+    """Return (accuracy, macro_f1) for `model` on an already-corrupted image batch.
+
+    Preprocesses and predicts `chunk_size` images at a time. Doing the whole set at once
+    means a 7,178 x 224 x 224 x 3 float32 array (4.3 GB) plus preprocessing copies for
+    VGG16, which got this process OOM-killed at ~11.7 GB on a 15 GB machine.
+    """
     img_size = model.input_shape[1]
-    x = _preprocess_for_model(images, model_name, img_size)
-    preds = np.argmax(model.predict(x, batch_size=64, verbose=0), axis=1)
+    pred_chunks = []
+    for start in range(0, len(images), chunk_size):
+        x = _preprocess_for_model(images[start : start + chunk_size], model_name, img_size)
+        pred_chunks.append(np.argmax(model.predict(x, batch_size=64, verbose=0), axis=1))
+    preds = np.concatenate(pred_chunks)
     report = classification_report(labels, preds, labels=range(NUM_CLASSES), output_dict=True, zero_division=0)
     return report["accuracy"], report["macro avg"]["f1-score"]
 

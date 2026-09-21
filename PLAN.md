@@ -253,7 +253,7 @@ Write from `docs/experiment_log.md`, the CSVs and `paper/figures/`. Target 15 pa
   - [x] Model + two-stage training script ready (`src/models/vgg16_tl.py`, `train_vgg16`); CPU smoke test passed
 - [x] Phase 4 — Evaluation and comparison table
 - [ ] Phase 5 — Robustness tests
-- [ ] Phase 6 — Grad-CAM
+- [x] Phase 6 — Grad-CAM
 - [ ] Phase 7 — Real-time app
 - [ ] Phase 8 — Figures and model viewing
 - [ ] Phase 9 — Results frozen (`v1.0-results`)

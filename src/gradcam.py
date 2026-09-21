@@ -19,10 +19,20 @@ from src.utils import ensure_dirs, set_seed
 DISPLAY_SIZE = 150  # upscaled resolution the original/overlay images are shown at
 
 
-def _predict_all(model: tf.keras.Model, model_name: str, images: np.ndarray, img_size: int) -> np.ndarray:
-    """Predicted class index for every raw image, using `model`'s own input size."""
-    x = _preprocess_for_model(images, model_name, img_size)
-    return np.argmax(model.predict(x, batch_size=64, verbose=0), axis=1)
+def _predict_all(
+    model: tf.keras.Model, model_name: str, images: np.ndarray, img_size: int, chunk_size: int = 256
+) -> np.ndarray:
+    """Predicted class index for every raw image, using `model`'s own input size.
+
+    Works `chunk_size` images at a time: preprocessing the whole test set for VGG16 at once
+    is a 4.3 GB float32 array plus copies, which gets the process OOM-killed (same bug that
+    hit src/robustness.py).
+    """
+    chunks = []
+    for start in range(0, len(images), chunk_size):
+        x = _preprocess_for_model(images[start : start + chunk_size], model_name, img_size)
+        chunks.append(np.argmax(model.predict(x, batch_size=64, verbose=0), axis=1))
+    return np.concatenate(chunks)
 
 
 def _build_grad_model(model: tf.keras.Model, layer_name: str) -> tf.keras.Model:
@@ -115,6 +125,20 @@ def _save_gradcam_grid(
     plt.close(fig)
 
 
+def _pick_diverse_errors(labels: np.ndarray, preds: np.ndarray, n: int, seed: int = SEED) -> np.ndarray:
+    """Up to `n` misclassified indices, at most one per true class, most-error classes first.
+
+    Test images are stored class by class, so just taking the first `n` errors returns
+    only the first class (every example was "true: angry" in the first version). This
+    picks one error per class instead, seeded so the figure is reproducible.
+    """
+    rng = np.random.default_rng(seed)
+    wrong = np.flatnonzero(preds != labels)
+    by_class = {c: wrong[labels[wrong] == c] for c in range(NUM_CLASSES)}
+    ranked = sorted((c for c in by_class if len(by_class[c])), key=lambda c: -len(by_class[c]))
+    return np.array([int(rng.choice(by_class[c])) for c in ranked[:n]], dtype=int)
+
+
 def _save_misclassified_grid(
     images: np.ndarray,
     labels: np.ndarray,
@@ -125,8 +149,8 @@ def _save_misclassified_grid(
     out_path: Path,
     n: int = 6,
 ) -> None:
-    """A grid of up to `n` misclassified examples with their Grad-CAM overlay for one model."""
-    wrong_idx = np.flatnonzero(preds != labels)[:n]
+    """A grid of up to `n` misclassified examples (spread across true classes) with Grad-CAM overlays."""
+    wrong_idx = _pick_diverse_errors(labels, preds, n)
     if len(wrong_idx) == 0:
         print(f"No misclassified examples found for {model_name}; skipping {out_path.name}.")
         return

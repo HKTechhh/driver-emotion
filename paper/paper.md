@@ -1,13 +1,13 @@
 <!--
 DRAFT STATUS (delete this block before submission)
-- Every number in Sections 3-5 comes from results/*.csv|json and docs/experiment_log.md.
-- TODO(robustness): Section 4.5, the robustness sentences in Sections 5 and 7, and the Abstract are waiting on the
-  full robustness run (results/robustness.csv). Nothing in those places is final.
+- Every number in Sections 3-5 and the Abstract comes from results/*.csv|json and docs/experiment_log.md;
+  robustness (Section 4.5), significance (Section 4.2), abstract and conclusion are now written from the final results.
 - TODO(realtime): the real-time app was verified on simulated frames with the trained models (Section 3.9) but NOT run
   live on a webcam with a person in front of it. If you run it, add the observed FPS and behaviour there.
 - TODO(references): all references were written from memory. Verify each one (authors, year, venue, pages/DOI)
-  before submitting, and add the literature that your department expects in Section 2. Formatting (APA vs IEEE,
-  page count, template) is not applied yet.
+  before submitting, and add the literature that your department expects in Section 2.
+- TODO(format): author/supervisor/institution are placeholders; APA vs IEEE, the template and the page limit are not
+  applied (currently ~19 pages with 13 figures; the plan targeted ~15 - trim figures or tighten prose as required).
 - This is a first draft of the writing, not a finished paper. Read it, correct it, and put it in your own words.
 -->
 
@@ -17,7 +17,7 @@ DRAFT STATUS (delete this block before submission)
 
 ## Abstract
 
-*TODO: write last, after the robustness results are final (about 200 words: problem, the two models, the headline numbers, the robustness finding, the main limitation).*
+Recognising a driver's emotional state from a camera could support safer driving, but models that score well on clean benchmarks may fail on the road. This study compares two convolutional models for seven-class facial expression recognition on FER2013 (28,709 training and 7,178 test images): a compact custom CNN of VGG-style blocks (4.8 M parameters) trained from scratch, and an ImageNet-pretrained VGG16 (15.0 M parameters) fine-tuned in two stages. On the test set the custom CNN reached 67.5% accuracy and 0.660 macro-F1 against 65.8% and 0.640 for VGG16. The 1.7-point accuracy gap is small but statistically distinguishable (paired bootstrap 95% CI 0.7 to 2.8 points; McNemar *p* = 0.0014), and the CNN ran 5.4 times faster on a laptop CPU (25 versus 4.6 frames per second). Under simulated driving conditions applied to the whole test set, the CNN degraded less than VGG16 in all five cases, by a large margin only for motion blur; low light reduced both models to roughly the accuracy of always predicting the most frequent class, while in-plane head rotation was nearly harmless. Grad-CAM showed both models attending to facial features when correct, whereas VGG16's errors more often rested on off-face regions. Limitations: FER2013 consists of web images, not in-cabin footage; the degradations are synthetic; each model was trained once; and the real-time pipeline was verified only on simulated frames.
 
 **Keywords:** facial expression recognition, driver monitoring, convolutional neural networks, transfer learning, robustness, Grad-CAM, FER2013
 
@@ -130,7 +130,7 @@ sklearn's "balanced" class weights give *disgust* a weight of about 9.4. In our 
 
 ### 3.7 Evaluation metrics and protocol
 
-On the full test partition we report accuracy, macro-F1 (the unweighted mean of per-class F1, which weights the rare classes equally), weighted-F1, per-class precision, recall and F1, and row-normalised confusion matrices. We also record parameter count, saved file size and single-image inference latency: the mean and 95th percentile of 200 timed calls after 20 warm-up calls, using direct `model(x)` calls on one image, from which frames per second (FPS) is derived. Latency was measured on the development laptop (Intel Core i5-8265U, 8 threads, no GPU), so it says something about a modest CPU and nothing about an in-vehicle processor.
+On the full test partition we report accuracy, macro-F1 (the unweighted mean of per-class F1, which weights the rare classes equally), weighted-F1, per-class precision, recall and F1, and row-normalised confusion matrices. We also record parameter count, saved file size and single-image inference latency: the mean and 95th percentile of 200 timed calls after 20 warm-up calls, using direct `model(x)` calls on one image, from which frames per second (FPS) is derived. To ask whether the difference between the two models could be test-sample noise, we compared their predictions image by image: 95% bootstrap intervals (2,000 resamples of the test images, seed 42) for accuracy and macro-F1, a paired bootstrap of the differences, and an exact McNemar test on the images for which exactly one model is correct. These intervals reflect sampling of the test set only; they do not capture variation between training runs. Latency was measured on the development laptop (Intel Core i5-8265U, 8 threads, no GPU), so it says something about a modest CPU and nothing about an in-vehicle processor.
 
 ### 3.8 Robustness protocol
 
@@ -181,7 +181,7 @@ VGG16's frozen-base stage plateaued at about 48–50% validation accuracy (50.1%
 | Latency, mean / p95 (CPU, 1 image) | 39.9 / 48.4 ms | 216.2 / 224.1 ms |
 | Throughput | **25.1 FPS** | 4.6 FPS |
 
-Test accuracy is close to validation accuracy for both models (0.6753 vs 0.6665; 0.6581 vs 0.6600), which indicates that selecting the checkpoint on validation data did not overfit to it. The custom CNN is better on every metric: about 1.7 percentage points more accurate, 5.4 times faster, and half the size. With 7,178 test images and one run per model, a 1.7-point difference is only modestly larger than sampling noise (roughly two standard errors by an unpaired estimate); we therefore describe the CNN as *at least as good as* VGG16 here, and not as clearly better. *TODO: add a paired significance test (McNemar) once per-image predictions are saved.*
+Test accuracy is close to validation accuracy for both models (0.6753 vs 0.6665; 0.6581 vs 0.6600), which indicates that selecting the checkpoint on validation data did not overfit to it. The custom CNN is better on every metric: about 1.7 percentage points more accurate, 5.4 times faster, and half the size. Is a 1.7-point gap more than test-sample noise? Bootstrap 95% intervals (Section 3.7) for accuracy are 0.663–0.686 for the CNN and 0.647–0.670 for VGG16, and for macro-F1 0.644–0.673 and 0.625–0.654. These intervals overlap, but both models are scored on the same images and make correlated errors, so the appropriate comparison is a paired one. The paired accuracy difference is 1.71 points (95% CI 0.70 to 2.76) and the paired macro-F1 difference is 1.98 points (95% CI 0.67 to 3.28); both intervals exclude zero. Of the images on which the two models disagree, the CNN is right on 795 and VGG16 on 672 (both are right on 4,052 and both wrong on 1,659), and an exact McNemar test gives *p* = 0.0014. The custom CNN's advantage is therefore small but unlikely to be test-sample noise. Two limits apply. Each model was trained once, and the bootstrap resamples test images only, so it does not capture variation between training runs; another seed could move either model by an amount we have not measured. And a difference of under two points carries little practical weight next to the fivefold difference in speed.
 
 ### 4.3 Per-class behaviour
 
@@ -254,7 +254,7 @@ These results are for one severity level per condition on simulated versions of 
 
 ### 5.1 Accuracy versus cost (RQ1)
 
-The main finding is negative for transfer learning: a 4.8 M-parameter network trained from scratch matched or slightly exceeded fine-tuned VGG16 on every metric while being 5.4 times faster and half the size. We can offer hypotheses but have not tested them. (a) FER2013 images are 48-pixel grayscale faces, far from the colour, high-resolution ImageNet images on which VGG16's features were learned; the frozen-base stage reaching only about 50% is consistent with that. (b) Only the last convolutional block was fine-tuned, at a small learning rate; unfreezing more, or using a different schedule, might help. (c) VGG16 has three times the parameters of the CNN on about 24,000 training images, and its validation loss diverges from its training loss earlier. We did no hyper-parameter search for either model, and each was trained once, so the comparison is between two reasonable configurations and not between two tuned models. Both are also below the low-70s accuracies reported for heavily tuned FER2013 systems [9], which is expected given the absence of tuning, test-time augmentation and ensembling.
+The main finding is negative for transfer learning: a 4.8 M-parameter network trained from scratch slightly but significantly exceeded fine-tuned VGG16 on accuracy and macro-F1 (Section 4.2) while being 5.4 times faster and half the size. We can offer hypotheses but have not tested them. (a) FER2013 images are 48-pixel grayscale faces, far from the colour, high-resolution ImageNet images on which VGG16's features were learned; the frozen-base stage reaching only about 50% is consistent with that. (b) Only the last convolutional block was fine-tuned, at a small learning rate; unfreezing more, or using a different schedule, might help. (c) VGG16 has three times the parameters of the CNN on about 24,000 training images, and its validation loss diverges from its training loss earlier. We did no hyper-parameter search for either model, and each was trained once, so the comparison is between two reasonable configurations and not between two tuned models. Both are also below the low-70s accuracies reported for heavily tuned FER2013 systems [9], which is expected given the absence of tuning, test-time augmentation and ensembling.
 
 ### 5.2 Which model suits a vehicle
 
@@ -279,7 +279,7 @@ None of these was found by inspecting accuracy alone. Sanity checks that did fin
 
 - **Domain.** FER2013 consists of web images of mostly frontal or near-frontal faces, many of them posed, at 48 × 48 grayscale. An in-vehicle camera differs in resolution, viewpoint, spectrum (often near-infrared) and expression naturalness. We did not obtain an in-vehicle dataset such as KMU-FED [17], so **this study does not establish performance on real drivers.**
 - **Simulated degradations.** The robustness conditions are simple synthetic transformations of clean images.
-- **Single runs.** Each model was trained once; seed-to-seed variance is unknown, and we did not use confidence intervals or significance tests beyond the informal estimate in Section 4.2.
+- **Single runs.** Each model was trained once; seed-to-seed variance is unknown. The confidence intervals and the McNemar test in Section 4.2 reflect test-set sampling only, and the robustness results in Section 4.5 carry no intervals.
 - **No tuning.** Neither model was tuned; the ranking might change with tuning.
 - **Labels.** FER2013 labels are noisy, which caps attainable accuracy.
 - **Grad-CAM** is qualitative, computed on a subset, with a handful of examples inspected by eye.
@@ -296,7 +296,7 @@ None of these was found by inspecting accuracy alone. Sanity checks that did fin
 
 ## 7. Conclusion
 
-On FER2013, a compact custom CNN built from VGG-style blocks (4.8 M parameters, trained from scratch) reached 67.5% test accuracy and 0.66 macro-F1, matching or slightly exceeding a fine-tuned VGG16 (65.8%, 0.64) while running 5.4 times faster and occupying half the space. Both models find *happy* and *surprise* easy and *fear* and *sad* hard, and VGG16 is notably worse at *fear*. Grad-CAM shows both attending to facial features when correct; VGG16's errors more often rest on off-face regions. *TODO(robustness): add the headline robustness finding.* The results support a small from-scratch model as the more practical choice for a CPU-bound in-vehicle system, subject to the important limitation that everything here was measured on web images and simulated degradations, not on drivers.
+On FER2013, a compact custom CNN built from VGG-style blocks (4.8 M parameters, trained from scratch) reached 67.5% test accuracy and 0.66 macro-F1, slightly but significantly exceeding a fine-tuned VGG16 (65.8%, 0.64; paired accuracy difference 1.7 points, 95% CI 0.7 to 2.8, McNemar *p* = 0.0014) while running 5.4 times faster and occupying half the space. Both models find *happy* and *surprise* easy and *fear* and *sad* hard, and VGG16 is notably worse at *fear*. Grad-CAM shows both attending to facial features when correct; VGG16's errors more often rest on off-face regions. Under simulated driving conditions the CNN degraded less than VGG16 in all five cases, by a large margin only for motion blur (13.5 points); low light collapsed both models to about the accuracy of always predicting the most frequent class, whereas in-plane head rotation was nearly harmless. The results support a small from-scratch model as the more practical choice for a CPU-bound in-vehicle system, subject to the important limitation that everything here was measured on web images and simulated degradations, not on drivers.
 
 **Future work.** Evaluate on in-vehicle data (for example KMU-FED [17]); train with the robustness corruptions as augmentation; repeat runs over several seeds with paired significance tests; tune both models; try near-infrared imagery; and run and report a live end-to-end evaluation with consenting volunteers.
 

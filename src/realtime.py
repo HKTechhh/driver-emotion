@@ -10,6 +10,12 @@ first use); if that's unavailable for any reason (no mediapipe, no network, API
 mismatch), it falls back to OpenCV's bundled Haar cascade, per PLAN.md's Phase 0/7
 contingency. Preprocessing is shared with training via src/preprocess.py so a live frame
 is treated exactly like a training image.
+
+By default no image is ever saved, only the CSV log (timestamp, predicted emotion,
+confidence, FPS) - see Section 6 of paper/paper.md. Pass --save-frames to additionally
+write each detected face crop to disk (e.g. to grow the training set); this is opt-in and
+was NOT used for any of the results reported in the paper. Get informed consent from
+whoever is on camera before using it (docs/car_deployment_guide.md, Section 8).
 """
 import argparse
 import csv
@@ -182,11 +188,13 @@ def process_frame(
     tracker: EmotionTracker,
     fps: float,
     face_padding: float,
-) -> Tuple[np.ndarray, Optional[dict]]:
+) -> Tuple[np.ndarray, Optional[dict], Optional[np.ndarray]]:
     """Detect -> preprocess -> predict -> smooth -> draw, for one frame.
 
-    Returns the annotated frame and a log row dict (or None if no face was found). Contains
-    no cv2.imshow/waitKey calls, so it can be unit-tested on a single static frame.
+    Returns the annotated frame, a log row dict (or None if no face was found), and the raw
+    BGR face crop before grayscale/resize (or None) for callers that want to save it (e.g.
+    --save-frames). Contains no cv2.imshow/waitKey calls, so it can be unit-tested on a
+    single static frame.
     """
     annotated = frame_bgr.copy()
     boxes = detect_fn(frame_bgr)
@@ -195,12 +203,12 @@ def process_frame(
             annotated, "No face detected", (10, annotated.shape[0] - 10),
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA,
         )
-        return annotated, None
+        return annotated, None, None
 
     x, y, w, h, _conf = max(boxes, key=lambda b: b[2] * b[3])
     crop = _crop_with_padding(frame_bgr, (x, y, w, h), face_padding)
     if crop.size == 0:
-        return annotated, None
+        return annotated, None, None
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     resized = cv2.resize(gray, (img_size, img_size), interpolation=cv2.INTER_AREA)
@@ -235,7 +243,7 @@ def process_frame(
         "confidence": confidence,
         "fps": fps,
     }
-    return annotated, log_row
+    return annotated, log_row, crop
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -246,6 +254,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera", type=int, default=REALTIME["camera_index"])
     parser.add_argument("--video", type=str, default=None, help="Video file, instead of a live camera.")
     parser.add_argument("--log", type=str, default=str(RESULTS_DIR / "live_log.csv"))
+    parser.add_argument(
+        "--save-frames", dest="save_frames", action="store_true",
+        help="Also save each detected face crop as a JPEG (default: off, no images are ever saved).",
+    )
+    parser.add_argument(
+        "--frames-dir", dest="frames_dir", type=str, default=None,
+        help="Where to save face crops when --save-frames is set (default: '<log>_frames/' next to the log).",
+    )
+    parser.add_argument(
+        "--save-every", dest="save_every", type=int, default=5,
+        help="With --save-frames, save one face crop out of every N detected (default: 5, since "
+             "consecutive video frames are near-duplicates and add little to a training set).",
+    )
     return parser
 
 
@@ -266,11 +287,22 @@ def main() -> None:
 
     log_path = Path(args.log)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["timestamp", "emotion", "confidence", "fps"]
+
+    frames_dir = None
+    if args.save_frames:
+        frames_dir = Path(args.frames_dir) if args.frames_dir else log_path.parent / f"{log_path.stem}_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        fieldnames.append("frame_file")
+        print(f"--save-frames is on: face crops will be written to {frames_dir}/ "
+              f"(one in every {args.save_every}). Make sure everyone on camera has consented to this.")
+
     log_file = open(log_path, "w", newline="")
-    writer = csv.DictWriter(log_file, fieldnames=["timestamp", "emotion", "confidence", "fps"])
+    writer = csv.DictWriter(log_file, fieldnames=fieldnames)
     writer.writeheader()
 
     prev_time = time.time()
+    faces_seen = 0
     try:
         while True:
             ok, frame = cap.read()
@@ -280,10 +312,22 @@ def main() -> None:
             fps = 1.0 / max(now - prev_time, 1e-6)
             prev_time = now
 
-            annotated, log_row = process_frame(
+            annotated, log_row, face_crop = process_frame(
                 frame, detect_fn, model, args.model, img_size, tracker, fps, REALTIME["face_padding"]
             )
             if log_row is not None:
+                if frames_dir is not None:
+                    faces_seen += 1
+                    log_row["frame_file"] = ""
+                    if face_crop is not None and faces_seen % args.save_every == 0:
+                        # Filename carries the *predicted* emotion, not a verified label - anyone
+                        # curating this into a training set still needs to check/correct it by eye.
+                        # The running counter (not just the timestamp, which only has 1-second
+                        # resolution) keeps filenames unique when several frames land in one second.
+                        stamp = log_row["timestamp"].replace(":", "-")
+                        filename = f"{stamp}_{faces_seen:06d}_{log_row['emotion']}_{log_row['confidence']:.2f}.jpg"
+                        cv2.imwrite(str(frames_dir / filename), face_crop)
+                        log_row["frame_file"] = filename
                 writer.writerow(log_row)
 
             cv2.imshow("Driver Emotion Recognition", annotated)

@@ -208,13 +208,20 @@ prediction is logged to the `--log` CSV. Face detection prefers MediaPipe (downl
 a small model on first use) and falls back to OpenCV's Haar cascade automatically if
 that's unavailable.
 
+By default **no image is ever saved**, only the CSV log. Pass `--save-frames` to also
+write one face crop in every `--save-every` (default 5) to `<log>_frames/`, e.g. to grow
+the training set with in-vehicle data — get informed consent from whoever is on camera
+first (`docs/car_deployment_guide.md`, Section 8). Filenames carry the *predicted*
+emotion, not a verified label, so anyone using these for training still needs to check
+or correct them by eye before adding them to a dataset.
+
 `src/preprocess.py` holds the per-model pixel preprocessing shared by `src/data.py`
 (training) and `src/realtime.py` (live inference), so a camera frame is always treated
 exactly like a training image.
 
 ## Project layout
 
-```
+```text
 config.py              # the only place for paths and hyperparameters
 src/
   data.py               # tf.data pipelines for FER2013

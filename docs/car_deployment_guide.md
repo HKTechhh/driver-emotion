@@ -25,6 +25,11 @@ out the feed, does the fan noise or heat become a problem on a warm day, and doe
 on `data/raw/test` images match what you see on a real face in a moving car. Only move on to a dedicated
 embedded box once this cheap version behaves the way you expect.
 
+This cheap stage is also the right time to collect more data if that is a goal: add `--save-frames` to the
+`src/realtime.py` command to save actual face photos (not just the CSV log) for later review or retraining.
+It is opt-in and off by default - see Section 8 below before turning it on, since it changes what you are
+asking the person on camera to consent to.
+
 ## 2. Choosing the compute
 
 The custom CNN is small (4.8 M parameters) and, as measured in Section 4.4 of the paper, runs at about
@@ -151,8 +156,14 @@ registered and used before installing anything.
 - **Recording someone's face is processing biometric-adjacent data** in many jurisdictions, which can carry
   stricter consent and storage rules than an ordinary dashcam. If the driver is not you (a shared car, a
   fleet vehicle, a rental, a family member's car), get their informed consent before switching this on,
-  and tell them plainly what is stored (per Section 6 of the paper: no images are saved, only a timestamp,
-  the predicted emotion, its confidence and the frame rate).
+  and tell them plainly what is stored. By default `src/realtime.py` saves nothing but a timestamp, the
+  predicted emotion, its confidence and the frame rate (Section 6 of the paper).
+- **If you run with `--save-frames`** (to grow the training set - see Section 1), the app now writes actual
+  face photos to disk, one in every `--save-every` frames. This is a materially bigger ask of anyone on
+  camera than the default logging-only mode, so get their explicit consent for photo capture specifically,
+  not just for "the app being on," tell them where the images go and who will see them, and delete anything
+  you don't end up using. Each filename carries the model's *predicted* emotion, which is not a verified
+  label - treat it as a sorting hint to speed up manual review, not as ground truth to train on directly.
 - Some regions restrict or require disclosure for any camera pointed at a vehicle's occupants, separate
   from data-protection law. Check local vehicle and traffic regulations, not just privacy law.
 - If this is ever used in a work vehicle, workplace-monitoring rules (and, in many places, a legal

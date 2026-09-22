@@ -234,11 +234,12 @@ src/
 notebooks/01_eda.ipynb    # class distribution, sample grid, image properties
 tests/                     # pytest
 docs/experiment_log.md      # dated log of every run and decision
+docs/car_deployment_guide.md # hardware/wiring/mounting/safety guide for running this in a real car
 results/                     # CSVs, JSON metrics, figures (mostly gitignored outputs)
 paper/figures/                 # curated final figures for the write-up
 paper/paper.md                  # first draft of the research paper (TODOs marked inside)
 paper/make_figures.py            # pipeline diagram, per-class chart, retained-accuracy chart, combined Grad-CAM
-paper/build_docx.py              # paper.md -> paper.docx (python3 paper/build_docx.py; docx is git-ignored)
+paper/build_docx.py              # any paper.md-style file -> .docx (python3 paper/build_docx.py [SRC.md OUT.docx]; docx is git-ignored)
 ```
 
 ## Notes

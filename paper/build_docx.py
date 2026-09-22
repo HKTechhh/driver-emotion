@@ -10,9 +10,11 @@ leading <!-- draft notes --> comment (shown as a grey note). Image syntax:
 
 Uses python-docx, which is installed for the system Python (not the project venv):
 
-    python3 paper/build_docx.py
+    python3 paper/build_docx.py                          # paper.md -> paper.docx (default)
+    python3 paper/build_docx.py SRC.md OUT.docx           # any other Markdown file, same rules
 """
 import re
+import sys
 from pathlib import Path
 
 from docx import Document
@@ -127,6 +129,10 @@ def add_page_number_footer(doc: Document) -> None:
 
 
 def main() -> None:
+    global HERE
+    src = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else SRC
+    out = Path(sys.argv[2]).resolve() if len(sys.argv) > 2 else OUT
+    HERE = src.parent   # image paths in the Markdown are resolved relative to its own folder
     doc = Document()
     for section in doc.sections:
         section.left_margin = section.right_margin = Inches(0.9)
@@ -144,7 +150,7 @@ def main() -> None:
         style.paragraph_format.keep_with_next = True
     add_page_number_footer(doc)
 
-    text = SRC.read_text(encoding="utf-8")
+    text = src.read_text(encoding="utf-8")
     grey = RGBColor(0x66, 0x66, 0x66)
     note = re.match(r"<!--(.*?)-->", text, re.S)
     if note:
@@ -180,9 +186,16 @@ def main() -> None:
             add_figure(doc, m.group(1), m.group(2).split(";"), float(m.group(3)) if m.group(3) else None)
             i += 1
         elif re.match(r"^(- |\d+\. )", stripped):
-            p = doc.add_paragraph(style="List Bullet" if stripped.startswith("- ") else "List Number")
+            # Ordered items are numbered by hand (literal "N. " text), not Word's built-in numbered-list
+            # style: that style shares one running counter document-wide, so a second numbered list (e.g.
+            # a later "1., 2., 3." block) would silently continue from the first list's last number.
+            ordered = re.match(r"^(\d+)\. ", stripped)
+            body = stripped[ordered.end():] if ordered else stripped[2:]
+            p = doc.add_paragraph()
             tight(p, after=2, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
-            add_runs(p, re.sub(r"^(- |\d+\. )", "", stripped))
+            p.paragraph_format.left_indent = Inches(0.25)
+            p.paragraph_format.first_line_indent = Inches(-0.25)
+            add_runs(p, f"{ordered.group(1)}. {body}" if ordered else f"• {body}")
             i += 1
         else:
             para = [stripped]
@@ -207,8 +220,8 @@ def main() -> None:
                 tight(p, after=4, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
                 add_runs(p, joined)
 
-    doc.save(OUT)
-    print(f"Wrote {OUT} ({OUT.stat().st_size // 1024} KiB)")
+    doc.save(out)
+    print(f"Wrote {out} ({out.stat().st_size // 1024} KiB)")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ whoever is on camera before using it (docs/car_deployment_guide.md, Section 8).
 """
 import argparse
 import csv
+import platform
 import time
 import urllib.request
 from collections import deque
@@ -267,7 +268,37 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="With --save-frames, save one face crop out of every N detected (default: 5, since "
              "consecutive video frames are near-duplicates and add little to a training set).",
     )
+    parser.add_argument(
+        "--backend", choices=["auto", "dshow", "msmf", "any"], default="auto",
+        help="OpenCV camera backend (Windows only affects dshow/msmf; ignored for --video). "
+             "'auto' (default) tries the platform default first, then DirectShow, then Media "
+             "Foundation, since some Windows webcam drivers only work with one of them. If the "
+             "camera window never opens on Windows, try --backend dshow explicitly.",
+    )
     return parser
+
+
+def _open_capture(source, backend: str) -> cv2.VideoCapture:
+    """Open `source` (a camera index or a video file path), trying alternate backends on failure.
+
+    OpenCV's default camera backend on Windows (Media Foundation) fails to open some webcams
+    outright; DirectShow works for most of those. This only matters for a live camera index
+    (a video file always uses its own container-format backend, so `backend` is ignored then).
+    """
+    is_camera = isinstance(source, int)
+    forced = {"dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF, "any": cv2.CAP_ANY}.get(backend)
+    if not is_camera or forced is not None:
+        return cv2.VideoCapture(source, forced) if forced is not None else cv2.VideoCapture(source)
+
+    cap = cv2.VideoCapture(source)  # backend == "auto": platform default first
+    if cap.isOpened() or platform.system() != "Windows":
+        return cap
+    for candidate in (cv2.CAP_DSHOW, cv2.CAP_MSMF):
+        cap.release()
+        cap = cv2.VideoCapture(source, candidate)
+        if cap.isOpened():
+            return cap
+    return cap  # still not opened; caller reports the error
 
 
 def main() -> None:
@@ -281,9 +312,15 @@ def main() -> None:
     tracker = EmotionTracker(REALTIME["smoothing_window"], REALTIME["alert_emotions"], REALTIME["alert_seconds"])
 
     source = args.video if args.video else args.camera
-    cap = cv2.VideoCapture(source)
+    cap = _open_capture(source, args.backend)
     if not cap.isOpened():
-        raise SystemExit(f"Could not open video source: {source}")
+        hint = (
+            " Nothing else (Teams, Zoom, the Windows Camera app, browser tabs) can be using it at "
+            "the same time; try --camera 1 if you have more than one camera; on Windows, try "
+            "--backend dshow or --backend msmf explicitly if 'auto' didn't already."
+            if not args.video else ""
+        )
+        raise SystemExit(f"Could not open video source: {source}.{hint}")
 
     log_path = Path(args.log)
     log_path.parent.mkdir(parents=True, exist_ok=True)

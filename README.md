@@ -206,7 +206,9 @@ predicts an emotion, smooths it over a moving window, and shows a live overlay
 banner if `angry`/`fear` leads for too long). Press `q` to quit. Every frame's
 prediction is logged to the `--log` CSV. Face detection prefers MediaPipe (downloading
 a small model on first use) and falls back to OpenCV's Haar cascade automatically if
-that's unavailable.
+that's unavailable. If the camera window never opens (common on Windows, where the default
+backend fails for some webcam drivers), try `--backend dshow` or `--backend msmf`; `auto`
+(the default) already tries both after the platform default fails.
 
 By default **no image is ever saved**, only the CSV log. Pass `--save-frames` to also
 write one face crop in every `--save-every` (default 5) to `<log>_frames/`, e.g. to grow

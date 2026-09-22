@@ -153,7 +153,7 @@ def main() -> None:
         add_runs(p, "*DRAFT NOTES (delete before submission):* " + " ".join(note.group(1).split()), size=8, colour=grey)
         text = text[note.end():]
 
-    lines, i, first_h1 = text.splitlines(), 0, True
+    lines, i, first_h1, in_references = text.splitlines(), 0, True, False
     while i < len(lines):
         stripped = lines[i].strip()
         if not stripped or stripped == "---":
@@ -173,6 +173,7 @@ def main() -> None:
                 first_h1 = False
             else:
                 add_runs(doc.add_heading(level=level - 1), stripped[level + 1:], size={1: 13, 2: 11.5, 3: 10.5}[level], colour=RGBColor(0, 0, 0), bold_all=True)
+                in_references = stripped[level + 1:].strip() == "References"
             i += 1
         elif stripped.startswith("!["):
             m = IMAGE.match(stripped)
@@ -197,6 +198,11 @@ def main() -> None:
             elif joined.startswith("**Author:**"):
                 tight(p, after=6, align=WD_ALIGN_PARAGRAPH.CENTER)
                 add_runs(p, joined, size=10)
+            elif in_references and not joined.startswith("*"):   # APA reference entry: hanging indent
+                tight(p, after=6, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
+                p.paragraph_format.left_indent = Inches(0.5)
+                p.paragraph_format.first_line_indent = Inches(-0.5)
+                add_runs(p, joined)
             else:
                 tight(p, after=4, align=WD_ALIGN_PARAGRAPH.JUSTIFY)
                 add_runs(p, joined)

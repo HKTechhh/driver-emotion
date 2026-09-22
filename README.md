@@ -11,10 +11,12 @@ comparative study of two architectures on FER2013 (7 emotion classes):
 The full build plan, phase by phase, is in [`PLAN.md`](PLAN.md). Project rules and
 coding conventions are in [`.cursor/rules/project.mdc`](.cursor/rules/project.mdc).
 
-**Status:** models trained, evaluated, stress-tested and explained; paper drafted. The
-remaining items need a person, not a computer: the live webcam run of the real-time app,
-the Netron / TensorBoard / app screenshots, and verifying the paper's references. See
-`PLAN.md` (progress tracker) and `docs/experiment_log.md` (every run, decision and bug).
+**Status:** models trained, evaluated, stress-tested and explained; a live webcam spot
+check confirmed the real-time app; the Netron / TensorBoard / app screenshots are in the
+paper; all 9 build phases are complete. What's left needs a person, not a computer:
+verifying the paper's references, choosing the final format/page limit, and (optionally)
+a longer live session with drivers. See `PLAN.md` (progress tracker) and
+`docs/experiment_log.md` (every run, decision and bug).
 
 ## Results (FER2013, full 7,178-image test set)
 

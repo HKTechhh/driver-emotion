@@ -254,8 +254,8 @@ Write from `docs/experiment_log.md`, the CSVs and `paper/figures/`. Target 15 pa
 - [x] Phase 4 — Evaluation and comparison table
 - [x] Phase 5 — Robustness tests
 - [x] Phase 6 — Grad-CAM
-- [ ] Phase 7 — Real-time app
-- [ ] Phase 8 — Figures and model viewing
+- [x] Phase 7 — Real-time app
+- [x] Phase 8 — Figures and model viewing
 - [x] Phase 9 — Results frozen (`v1.0-results`)
 - [ ] Phase 10 — Paper
 

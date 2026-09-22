@@ -2,12 +2,13 @@
 DRAFT STATUS (delete this block before submission)
 - Every number in Sections 3-5 and the Abstract comes from results/*.csv|json and docs/experiment_log.md;
   robustness (Section 4.5), significance (Section 4.2), abstract and conclusion are now written from the final results.
-- TODO(realtime): the real-time app was verified on simulated frames with the trained models (Section 3.9) but NOT run
-  live on a webcam with a person in front of it. If you run it, add the observed FPS and behaviour there.
+- A single live webcam frame was captured and added as evidence that the pipeline runs end to end on a real camera
+  (Figure 10, right; Section 3.9). This is a spot check, not a systematic live evaluation with drivers - if you run a
+  full live session, add the observed accuracy, FPS and behaviour over time.
 - TODO(references): all references were written from memory. Verify each one (authors, year, venue, pages/DOI)
   before submitting, and add the literature that your department expects in Section 2.
-- TODO(format): author/supervisor/institution are placeholders; APA vs IEEE, the template and the page limit are not
-  applied (currently ~19 pages with 13 figures; the plan targeted ~15 - trim figures or tighten prose as required).
+- TODO(format): author/supervisor/institution are placeholders. Citations and the reference list are now APA 7th
+  edition; the template and page limit are still not applied (currently ~16 pages with 14 figures).
 - This is a first draft of the writing, not a finished paper. Read it, correct it, and put it in your own words.
 -->
 
@@ -25,9 +26,9 @@ Recognising a driver's emotional state from a camera could support safer driving
 
 ## 1. Introduction
 
-Road traffic injuries remain a leading cause of death worldwide [1], and a substantial share of crashes involve driver error rather than mechanical failure. A driver's emotional state is one factor that can degrade driving: anger and other high-arousal states are associated with aggressive behaviour, and low-arousal states such as sadness with reduced attention [2, 3]. If a vehicle could notice, from the driver's face, that the driver is becoming angry or afraid, it could respond with a calm prompt, a change in assistance level, or a record for the driver's own review. This is the motivation behind *driver monitoring systems* that use an in-cabin camera.
+Road traffic injuries remain a leading cause of death worldwide (World Health Organization, 2023), and a substantial share of crashes involve driver error rather than mechanical failure. A driver's emotional state is one factor that can degrade driving: anger and other high-arousal states are associated with aggressive behaviour, and low-arousal states such as sadness with reduced attention (Jeon, 2016; Mesken et al., 2007). If a vehicle could notice, from the driver's face, that the driver is becoming angry or afraid, it could respond with a calm prompt, a change in assistance level, or a record for the driver's own review. This is the motivation behind *driver monitoring systems* that use an in-cabin camera.
 
-Recognising emotion from a face is a hard problem even in benign conditions. Expressions are subtle and ambiguous, human annotators disagree with one another, and the standard benchmark used here (FER2013) is known to be noisy [4, 5]. Driving makes it harder still. Illumination changes quickly, from tunnels to low sun; motion and vibration blur the image; hands, sunglasses and steering-wheel spokes occlude the face; and the driver's head is rarely frontal. A model that scores well on a clean benchmark may therefore fail on the road, and an accuracy figure alone does not say how.
+Recognising emotion from a face is a hard problem even in benign conditions. Expressions are subtle and ambiguous, human annotators disagree with one another, and the standard benchmark used here (FER2013) is known to be noisy (Goodfellow et al., 2013; Barsoum et al., 2016). Driving makes it harder still. Illumination changes quickly, from tunnels to low sun; motion and vibration blur the image; hands, sunglasses and steering-wheel spokes occlude the face; and the driver's head is rarely frontal. A model that scores well on a clean benchmark may therefore fail on the road, and an accuracy figure alone does not say how.
 
 This project studies that gap with a deliberately simple design: two convolutional models, one benchmark, and a controlled set of "urban traffic" corruptions.
 
@@ -50,23 +51,23 @@ This project studies that gap with a deliberately simple design: two convolution
 
 ### 2.1 Emotion and driving
 
-Discrete-emotion models, in which a small set of "basic" emotions is recognisable across cultures from facial expression, go back to Ekman and Friesen [6]. FER2013 and most subsequent benchmarks use the seven-class version (anger, disgust, fear, happiness, sadness, surprise, neutral). Studies of emotion in driving report that specific emotional states, notably anger, are associated with riskier driving behaviour, and that sadness can impair performance as well [2, 3]. That is the rationale for treating anger and fear as the *alert* emotions in our real-time application (Section 3.9), while acknowledging that a facial expression is not the same thing as an inner state (Section 6).
+Discrete-emotion models, in which a small set of "basic" emotions is recognisable across cultures from facial expression, go back to Ekman and Friesen (1971). FER2013 and most subsequent benchmarks use the seven-class version (anger, disgust, fear, happiness, sadness, surprise, neutral). Studies of emotion in driving report that specific emotional states, notably anger, are associated with riskier driving behaviour, and that sadness can impair performance as well (Jeon, 2016; Mesken et al., 2007). That is the rationale for treating anger and fear as the *alert* emotions in our real-time application (Section 3.9), while acknowledging that a facial expression is not the same thing as an inner state (Section 6).
 
 ### 2.2 Facial expression recognition and FER2013
 
-Facial expression recognition (FER) with deep networks is surveyed in [7]. The FER2013 dataset [4] contains 48 × 48 grayscale faces collected from the web and labelled with seven emotions; it became a standard benchmark because it is large, free and difficult. Its labels are noisy: the original report notes human accuracy of roughly 65% [4], and relabelling efforts such as FER+ [5] were produced precisely because of this. Later datasets such as AffectNet [8] are larger and collected in the wild. Reported FER2013 accuracies for single, heavily tuned VGG-style networks are in the low 70s percent [9]; results in that range typically involve extensive hyper-parameter search, specific optimisers and schedules, and test-time augmentation, none of which are attempted here. A ceiling well below 100% should therefore be expected, and our results should be read against that ceiling and not against 100%.
+Facial expression recognition (FER) with deep networks is surveyed by Li and Deng (2022). The FER2013 dataset (Goodfellow et al., 2013) contains 48 × 48 grayscale faces collected from the web and labelled with seven emotions; it became a standard benchmark because it is large, free and difficult. Its labels are noisy: the original report notes human accuracy of roughly 65% (Goodfellow et al., 2013), and relabelling efforts such as FER+ (Barsoum et al., 2016) were produced precisely because of this. Later datasets such as AffectNet (Mollahosseini et al., 2019) are larger and collected in the wild. Reported FER2013 accuracies for single, heavily tuned VGG-style networks are in the low 70s percent (Khaireddin & Chen, 2021); results in that range typically involve extensive hyper-parameter search, specific optimisers and schedules, and test-time augmentation, none of which are attempted here. A ceiling well below 100% should therefore be expected, and our results should be read against that ceiling and not against 100%.
 
 ### 2.3 Convolutional architectures and transfer learning
 
-Deep convolutional networks [10, 11] are the dominant approach to image classification. VGG [12] showed that stacking small 3 × 3 convolutions between pooling layers gives a simple, effective and easily described design; VGG16 trained on ImageNet [13] is a common starting point for transfer learning. Batch normalisation [14] and dropout [15] are standard regularisers, and Adam [16] a standard optimiser. Transfer learning is usually most valuable when the target data are scarce and resemble the source domain. FER2013 is small by modern standards but differs from ImageNet in resolution, colour and content, so it is not obvious in advance that transfer will beat a compact network trained from scratch. RQ1 tests exactly this.
+Deep convolutional networks (LeCun et al., 2015; Krizhevsky et al., 2012) are the dominant approach to image classification. VGG (Simonyan & Zisserman, 2015) showed that stacking small 3 × 3 convolutions between pooling layers gives a simple, effective and easily described design; VGG16 trained on ImageNet (Russakovsky et al., 2015) is a common starting point for transfer learning. Batch normalisation (Ioffe & Szegedy, 2015) and dropout (Srivastava et al., 2014) are standard regularisers, and Adam (Kingma & Ba, 2015) a standard optimiser. Transfer learning is usually most valuable when the target data are scarce and resemble the source domain. FER2013 is small by modern standards but differs from ImageNet in resolution, colour and content, so it is not obvious in advance that transfer will beat a compact network trained from scratch. RQ1 tests exactly this.
 
 ### 2.4 Driver monitoring
 
-In-cabin driver monitoring typically combines a camera (often near-infrared, so that it works at night) with models for attention, drowsiness and, more recently, affect. Publicly available data for *driver* expressions are scarce. KMU-FED [17] is a database of facial expressions captured in a vehicle; we did not obtain it, which is a limitation of this study (Section 5.5).
+In-cabin driver monitoring typically combines a camera (often near-infrared, so that it works at night) with models for attention, drowsiness and, more recently, affect. Publicly available data for *driver* expressions are scarce. KMU-FED (Jeong & Ko, 2018) is a database of facial expressions captured in a vehicle; we did not obtain it, which is a limitation of this study (Section 5.5).
 
 ### 2.5 Explaining what a network looks at
 
-Grad-CAM [18] uses the gradient of a class score with respect to the activations of a late convolutional layer to produce a coarse heat map of the regions that most influenced that score. It is widely used to check whether a classifier attends to plausible evidence or to an artefact such as the background. It is a diagnostic, not a proof of causal reliance.
+Grad-CAM (Selvaraju et al., 2017) uses the gradient of a class score with respect to the activations of a late convolutional layer to produce a coarse heat map of the regions that most influenced that score. It is widely used to check whether a classifier attends to plausible evidence or to an artefact such as the background. It is a diagnostic, not a proof of causal reliance.
 
 ### 2.6 Gap addressed here
 
@@ -124,7 +125,7 @@ Model B (14,980,935 parameters) is Keras' VGG16 with ImageNet weights and no top
 
 ### 3.5 Training protocol
 
-Table 2 lists the setup. Both models use Adam [16] and sparse categorical cross-entropy, with class weights (Section 3.6). Callbacks are shared: the checkpoint with the best **validation** accuracy is kept; early stopping (patience 10, restore best weights); `ReduceLROnPlateau` on validation accuracy (factor 0.5, patience 4). The custom CNN used batch size 64 and a maximum of 60 epochs from a learning rate of 10⁻³; VGG16 used batch size 32 and the two stages above. Random seeds were fixed (seed 42) for Python, NumPy and TensorFlow, but the GPU kernels are not bit-wise deterministic, and **each model was trained once**, so run-to-run variation is not measured. Training was done on a Kaggle NVIDIA T4 GPU (custom CNN: 21.5 min; VGG16: 123.4 min). Software: Python 3.11.15, TensorFlow 2.20 / Keras 3.15 for the local evaluation.
+Table 2 lists the setup. Both models use Adam (Kingma & Ba, 2015) and sparse categorical cross-entropy, with class weights (Section 3.6). Callbacks are shared: the checkpoint with the best **validation** accuracy is kept; early stopping (patience 10, restore best weights); `ReduceLROnPlateau` on validation accuracy (factor 0.5, patience 4). The custom CNN used batch size 64 and a maximum of 60 epochs from a learning rate of 10⁻³; VGG16 used batch size 32 and the two stages above. Random seeds were fixed (seed 42) for Python, NumPy and TensorFlow, but the GPU kernels are not bit-wise deterministic, and **each model was trained once**, so run-to-run variation is not measured. Training was done on a Kaggle NVIDIA T4 GPU (custom CNN: 21.5 min; VGG16: 123.4 min). Software: Python 3.11.15, TensorFlow 2.20 / Keras 3.15 for the local evaluation.
 
 **Table 2.** Training setup for the two models.
 
@@ -170,7 +171,7 @@ Both models are re-evaluated on each corrupted copy of the test set and accuracy
 
 **Grad-CAM.** Heat maps are computed from `block4_conv2` (custom CNN, a 6 × 6 map at 48-pixel input) and `block5_conv3` (VGG16, a 14 × 14 map), for the class the model predicted, and overlaid on the face. Because of the compute involved, the figures use a class-balanced 25% subset of the test set (about 1,800 images). We show one example per emotion that both models classify correctly, and six misclassified examples per model, one per true class for the six classes with most errors.
 
-**Real-time pipeline.** The application captures frames with OpenCV, detects faces with MediaPipe's BlazeFace detector [19] (falling back to an OpenCV Haar cascade if MediaPipe is unavailable), crops the largest face with 15% padding, applies the shared preprocessing, predicts, and smooths the class probabilities with a 10-frame moving average. If *angry* or *fear* remains the top class for more than 3 seconds it shows an on-screen prompt. Per-frame output (timestamp, emotion, confidence, FPS) is logged to a CSV; **no image is stored**. *Verification status:* the full detect-crop-preprocess-predict path was run with the trained checkpoints on *simulated* frames (a test face enlarged six times and placed on a grey 640 × 480 canvas). A face was found in 118 of 120 frames for the custom CNN and 38 of 40 for VGG16. End-to-end accuracy on those frames was 0.669 (CNN, n = 118) and 0.789 (VGG16, n = 38; a small sample), against 0.708 and 0.725 for the same models applied directly to the original 48-pixel images, differences that are within sampling noise at these sample sizes. However, the label produced by the real-time path agreed with the direct label on only 78% (CNN) and 76% (VGG16) of frames: the detector's box plus 15% padding frames the face differently from the tight FER2013 crops the models were trained on, and individual predictions are sensitive to that framing. The complete loop has **not** been evaluated live with drivers or a real camera, so no live accuracy or frame-rate claim is made for it.
+**Real-time pipeline.** The application captures frames with OpenCV, detects faces with MediaPipe's BlazeFace detector (Bazarevsky et al., 2019) (falling back to an OpenCV Haar cascade if MediaPipe is unavailable), crops the largest face with 15% padding, applies the shared preprocessing, predicts, and smooths the class probabilities with a 10-frame moving average. If *angry* or *fear* remains the top class for more than 3 seconds it shows an on-screen prompt. Per-frame output (timestamp, emotion, confidence, FPS) is logged to a CSV; **no image is stored**. *Verification status:* the full detect-crop-preprocess-predict path was run with the trained checkpoints on *simulated* frames (a test face enlarged six times and placed on a grey 640 × 480 canvas). A face was found in 118 of 120 frames for the custom CNN and 38 of 40 for VGG16. End-to-end accuracy on those frames was 0.669 (CNN, n = 118) and 0.789 (VGG16, n = 38; a small sample), against 0.708 and 0.725 for the same models applied directly to the original 48-pixel images, differences that are within sampling noise at these sample sizes. However, the label produced by the real-time path agreed with the direct label on only 78% (CNN) and 76% (VGG16) of frames: the detector's box plus 15% padding frames the face differently from the tight FER2013 crops the models were trained on, and individual predictions are sensitive to that framing. A live webcam session was additionally run to confirm the pipeline operates end to end on a real camera feed (Figure 10, right); this single-frame spot check is not a systematic live evaluation, so no live accuracy claim beyond it is made, and the loop has **not** been evaluated with actual drivers.
 
 ---
 
@@ -236,9 +237,9 @@ Both models find *happy* (F1 0.86–0.88) and *surprise* (0.77–0.79) easiest a
 
 ### 4.4 Computational cost and the real-time application
 
-On the development CPU the custom CNN runs at about 25 frames per second for the model alone, VGG16 at about 4.6. Live video also needs face detection, cropping and drawing, so end-to-end frame rates will be lower than these model-only figures. The 25 FPS figure is an upper bound for this pipeline on this laptop, not a measurement of the live application. Figure 10 shows what the application displays, produced by the application's own frame-processing code with the trained custom CNN on simulated webcam frames (real test faces placed on a 640 × 480 canvas); the frame rate printed on each frame is the measured speed of that single call on the development laptop.
+On the development CPU the custom CNN runs at about 25 frames per second for the model alone, VGG16 at about 4.6. Live video also needs face detection, cropping and drawing, so end-to-end frame rates will be lower than these model-only figures. The 25 FPS figure is an upper bound for this pipeline on this laptop, not a measurement of the live application. Figure 10 shows what the application displays: (left) simulated webcam frames, produced by the application's own frame-processing code with the trained custom CNN on real test faces placed on a 640 × 480 canvas, used to illustrate the bounding box, probability bars, alert banner and no-face message in a controlled way; (right) one live capture from an actual webcam session with the custom CNN, confirming the pipeline runs end to end on a real camera feed at 4.5 FPS on the development laptop, correctly reading a neutral expression at 92% confidence.
 
-![Figure 10. Output of the real-time pipeline on simulated frames (not a live camera session): bounding box, top emotion, per-class probability bars and frame rate; the alert banner (alert delay set to 0 s purely to illustrate it; the default is 3 s); and the message shown when no face is found.](figures/realtime_demo.png){5.2}
+![Figure 10. Left: output on simulated frames (bounding box, top emotion, probability bars, frame rate; the alert banner with its delay set to 0 s purely to illustrate it, default 3 s; and the no-face message). Right: one live webcam frame from an actual session, not simulated.](figures/realtime_demo.png;figures/realtime_live_screenshot.png){6.4}
 
 ### 4.5 Robustness under simulated driving conditions
 
@@ -283,7 +284,7 @@ These results are for one severity level per condition on simulated versions of 
 
 ### 5.1 Accuracy versus cost (RQ1)
 
-The main finding is negative for transfer learning: a 4.8 M-parameter network trained from scratch slightly but significantly exceeded fine-tuned VGG16 on accuracy and macro-F1 (Section 4.2) while being 5.4 times faster and half the size. We can offer hypotheses but have not tested them. (a) FER2013 images are 48-pixel grayscale faces, far from the colour, high-resolution ImageNet images on which VGG16's features were learned; the frozen-base stage reaching only about 50% is consistent with that. (b) Only the last convolutional block was fine-tuned, at a small learning rate; unfreezing more, or using a different schedule, might help. (c) VGG16 has three times the parameters of the CNN on about 24,000 training images, and its validation loss diverges from its training loss earlier. We did no hyper-parameter search for either model, and each was trained once, so the comparison is between two reasonable configurations and not between two tuned models. Both are also below the low-70s accuracies reported for heavily tuned FER2013 systems [9], which is expected given the absence of tuning, test-time augmentation and ensembling.
+The main finding is negative for transfer learning: a 4.8 M-parameter network trained from scratch slightly but significantly exceeded fine-tuned VGG16 on accuracy and macro-F1 (Section 4.2) while being 5.4 times faster and half the size. We can offer hypotheses but have not tested them. (a) FER2013 images are 48-pixel grayscale faces, far from the colour, high-resolution ImageNet images on which VGG16's features were learned; the frozen-base stage reaching only about 50% is consistent with that. (b) Only the last convolutional block was fine-tuned, at a small learning rate; unfreezing more, or using a different schedule, might help. (c) VGG16 has three times the parameters of the CNN on about 24,000 training images, and its validation loss diverges from its training loss earlier. We did no hyper-parameter search for either model, and each was trained once, so the comparison is between two reasonable configurations and not between two tuned models. Both are also below the low-70s accuracies reported for heavily tuned FER2013 systems (Khaireddin & Chen, 2021), which is expected given the absence of tuning, test-time augmentation and ensembling.
 
 ### 5.2 Which model suits a vehicle
 
@@ -306,7 +307,7 @@ None of these was found by inspecting accuracy alone. Sanity checks that did fin
 
 ### 5.5 Limitations
 
-- **Domain.** FER2013 consists of web images of mostly frontal or near-frontal faces, many of them posed, at 48 × 48 grayscale. An in-vehicle camera differs in resolution, viewpoint, spectrum (often near-infrared) and expression naturalness. We did not obtain an in-vehicle dataset such as KMU-FED [17], so **this study does not establish performance on real drivers.**
+- **Domain.** FER2013 consists of web images of mostly frontal or near-frontal faces, many of them posed, at 48 × 48 grayscale. An in-vehicle camera differs in resolution, viewpoint, spectrum (often near-infrared) and expression naturalness. We did not obtain an in-vehicle dataset such as KMU-FED (Jeong & Ko, 2018), so **this study does not establish performance on real drivers.**
 - **Simulated degradations.** The robustness conditions are simple synthetic transformations of clean images.
 - **Single runs.** Each model was trained once; seed-to-seed variance is unknown. The confidence intervals and the McNemar test in Section 4.2 reflect test-set sampling only, and the robustness results in Section 4.5 carry no intervals.
 - **No tuning.** Neither model was tuned; the ranking might change with tuning.
@@ -327,7 +328,7 @@ None of these was found by inspecting accuracy alone. Sanity checks that did fin
 
 On FER2013, a compact custom CNN built from VGG-style blocks (4.8 M parameters, trained from scratch) reached 67.5% test accuracy and 0.66 macro-F1, slightly but significantly exceeding a fine-tuned VGG16 (65.8%, 0.64; paired accuracy difference 1.7 points, 95% CI 0.7 to 2.8, McNemar *p* = 0.0014) while running 5.4 times faster and occupying half the space. Both models find *happy* and *surprise* easy and *fear* and *sad* hard, and VGG16 is notably worse at *fear*. Grad-CAM shows both attending to facial features when correct; VGG16's errors more often rest on off-face regions. Under simulated driving conditions the CNN degraded less than VGG16 in all five cases, by a large margin only for motion blur (13.5 points); low light collapsed both models to about the accuracy of always predicting the most frequent class, whereas in-plane head rotation was nearly harmless. The results support a small from-scratch model as the more practical choice for a CPU-bound in-vehicle system, subject to the important limitation that everything here was measured on web images and simulated degradations, not on drivers.
 
-**Future work.** Evaluate on in-vehicle data (for example KMU-FED [17]); train with the robustness corruptions as augmentation; repeat runs over several seeds with paired significance tests; tune both models; try near-infrared imagery; and run and report a live end-to-end evaluation with consenting volunteers.
+**Future work.** Evaluate on in-vehicle data (for example, Jeong and Ko's [2018] KMU-FED); train with the robustness corruptions as augmentation; repeat runs over several seeds with paired significance tests; tune both models; try near-infrared imagery; and run and report a live end-to-end evaluation with consenting volunteers.
 
 ---
 
@@ -335,42 +336,42 @@ On FER2013, a compact custom CNN built from VGG-style blocks (4.8 M parameters, 
 
 *Written from memory, so verify each entry (authors, year, venue, pages or DOI) before submission.*
 
-[1] World Health Organization, *Global Status Report on Road Safety 2023*. Geneva: WHO, 2023.
+Barsoum, E., Zhang, C., Canton Ferrer, C., & Zhang, Z. (2016). Training deep networks for facial expression recognition with crowd-sourced label distribution. In *Proceedings of the ACM International Conference on Multimodal Interaction*.
 
-[2] M. Jeon, "Don't cry while you're driving: Sad driving is as bad as angry driving," *International Journal of Human–Computer Interaction*, vol. 32, no. 10, pp. 777–790, 2016.
+Bazarevsky, V., Kartynnik, Y., Vakunov, A., Raveendran, K., & Grundmann, M. (2019). BlazeFace: Sub-millisecond neural face detection on mobile GPUs. *arXiv*. https://arxiv.org/abs/1907.05047
 
-[3] J. Mesken, M. P. Hagenzieker, T. Rothengatter and D. de Waard, "Frequency, determinants, and consequences of different drivers' emotions: An on-the-road study using self-reports, (observed) behaviour, and physiology," *Transportation Research Part F*, vol. 10, no. 6, pp. 458–475, 2007.
+Ekman, P., & Friesen, W. V. (1971). Constants across cultures in the face and emotion. *Journal of Personality and Social Psychology, 17*(2), 124–129.
 
-[4] I. J. Goodfellow *et al.*, "Challenges in representation learning: A report on three machine learning contests," in *Neural Information Processing (ICONIP 2013)*, LNCS 8228, pp. 117–124, 2013.
+Goodfellow, I. J., Erhan, D., Carrier, P. L., Courville, A., Mirza, M., Hamner, B., Cukierski, W., Tang, Y., Thaler, D., Lee, D.-H., Zhou, Y., Ramaiah, C., Feng, F., Li, R., Wang, X., Athanasakis, D., Shawe-Taylor, J., Milakov, M., Park, J., … Bengio, Y. (2013). Challenges in representation learning: A report on three machine learning contests. In *Neural Information Processing (ICONIP 2013)* (LNCS 8228, pp. 117–124). Springer.
 
-[5] E. Barsoum, C. Zhang, C. Canton Ferrer and Z. Zhang, "Training deep networks for facial expression recognition with crowd-sourced label distribution," in *Proc. ACM ICMI*, 2016.
+Ioffe, S., & Szegedy, C. (2015). Batch normalization: Accelerating deep network training by reducing internal covariate shift. In *Proceedings of the International Conference on Machine Learning* (pp. 448–456).
 
-[6] P. Ekman and W. V. Friesen, "Constants across cultures in the face and emotion," *Journal of Personality and Social Psychology*, vol. 17, no. 2, pp. 124–129, 1971.
+Jeon, M. (2016). Don't cry while you're driving: Sad driving is as bad as angry driving. *International Journal of Human–Computer Interaction, 32*(10), 777–790.
 
-[7] S. Li and W. Deng, "Deep facial expression recognition: A survey," *IEEE Transactions on Affective Computing*, vol. 13, no. 3, pp. 1195–1215, 2022.
+Jeong, M., & Ko, B. C. (2018). Driver's facial expression recognition in real-time for safe driving. *Sensors, 18*(12), Article 4270.
 
-[8] A. Mollahosseini, B. Hasani and M. H. Mahoor, "AffectNet: A database for facial expression, valence, and arousal computing in the wild," *IEEE Transactions on Affective Computing*, vol. 10, no. 1, pp. 18–31, 2019.
+Khaireddin, Y., & Chen, Z. (2021). Facial emotion recognition: State of the art performance on FER2013. *arXiv*. https://arxiv.org/abs/2105.03588
 
-[9] Y. Khaireddin and Z. Chen, "Facial emotion recognition: State of the art performance on FER2013," arXiv:2105.03588, 2021.
+Kingma, D. P., & Ba, J. (2015). Adam: A method for stochastic optimization. In *Proceedings of the International Conference on Learning Representations*.
 
-[10] Y. LeCun, Y. Bengio and G. Hinton, "Deep learning," *Nature*, vol. 521, pp. 436–444, 2015.
+Krizhevsky, A., Sutskever, I., & Hinton, G. E. (2012). ImageNet classification with deep convolutional neural networks. In *Advances in Neural Information Processing Systems* (Vol. 25).
 
-[11] A. Krizhevsky, I. Sutskever and G. E. Hinton, "ImageNet classification with deep convolutional neural networks," in *Advances in Neural Information Processing Systems 25*, 2012.
+LeCun, Y., Bengio, Y., & Hinton, G. (2015). Deep learning. *Nature, 521*, 436–444.
 
-[12] K. Simonyan and A. Zisserman, "Very deep convolutional networks for large-scale image recognition," in *Proc. ICLR*, 2015 (arXiv:1409.1556).
+Li, S., & Deng, W. (2022). Deep facial expression recognition: A survey. *IEEE Transactions on Affective Computing, 13*(3), 1195–1215.
 
-[13] O. Russakovsky *et al.*, "ImageNet large scale visual recognition challenge," *International Journal of Computer Vision*, vol. 115, no. 3, pp. 211–252, 2015.
+Mesken, J., Hagenzieker, M. P., Rothengatter, T., & de Waard, D. (2007). Frequency, determinants, and consequences of different drivers' emotions: An on-the-road study using self-reports, (observed) behaviour, and physiology. *Transportation Research Part F: Traffic Psychology and Behaviour, 10*(6), 458–475.
 
-[14] S. Ioffe and C. Szegedy, "Batch normalization: Accelerating deep network training by reducing internal covariate shift," in *Proc. ICML*, pp. 448–456, 2015.
+Mollahosseini, A., Hasani, B., & Mahoor, M. H. (2019). AffectNet: A database for facial expression, valence, and arousal computing in the wild. *IEEE Transactions on Affective Computing, 10*(1), 18–31.
 
-[15] N. Srivastava, G. Hinton, A. Krizhevsky, I. Sutskever and R. Salakhutdinov, "Dropout: A simple way to prevent neural networks from overfitting," *Journal of Machine Learning Research*, vol. 15, pp. 1929–1958, 2014.
+Russakovsky, O., Deng, J., Su, H., Krause, J., Satheesh, S., Ma, S., Huang, Z., Karpathy, A., Khosla, A., Bernstein, M., Berg, A. C., & Fei-Fei, L. (2015). ImageNet large scale visual recognition challenge. *International Journal of Computer Vision, 115*(3), 211–252.
 
-[16] D. P. Kingma and J. Ba, "Adam: A method for stochastic optimization," in *Proc. ICLR*, 2015.
+Selvaraju, R. R., Cogswell, M., Das, A., Vedantam, R., Parikh, D., & Batra, D. (2017). Grad-CAM: Visual explanations from deep networks via gradient-based localization. In *Proceedings of the IEEE International Conference on Computer Vision* (pp. 618–626).
 
-[17] M. Jeong and B. C. Ko, "Driver's facial expression recognition in real-time for safe driving," *Sensors*, vol. 18, no. 12, art. 4270, 2018.
+Simonyan, K., & Zisserman, A. (2015). Very deep convolutional networks for large-scale image recognition. In *Proceedings of the International Conference on Learning Representations*. https://arxiv.org/abs/1409.1556
 
-[18] R. R. Selvaraju *et al.*, "Grad-CAM: Visual explanations from deep networks via gradient-based localization," in *Proc. IEEE ICCV*, pp. 618–626, 2017.
+Srivastava, N., Hinton, G., Krizhevsky, A., Sutskever, I., & Salakhutdinov, R. (2014). Dropout: A simple way to prevent neural networks from overfitting. *Journal of Machine Learning Research, 15*, 1929–1958.
 
-[19] V. Bazarevsky, Y. Kartynnik, A. Vakunov, K. Raveendran and M. Grundmann, "BlazeFace: Sub-millisecond neural face detection on mobile GPUs," arXiv:1907.05047, 2019.
+World Health Organization. (2023). *Global status report on road safety 2023*. https://www.who.int/publications/i/item/9789240086517
 
 *Software:* TensorFlow/Keras, OpenCV, scikit-learn, NumPy, pandas, matplotlib, MediaPipe. All code, configuration, logs and figures are in the project repository (`docs/experiment_log.md` records every run and decision).

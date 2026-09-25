@@ -1,16 +1,12 @@
 # Colorful custom theme for app_collect.py (the data-collection Streamlit app).
 # See docs/car_deployment_guide.md and README.md for the rest of the project - this
 # theme only affects how Streamlit apps in this repo render, nothing else.
+#
+# Both [theme.light] and [theme.dark] are defined (not just a single [theme] block),
+# which is what makes the light/dark toggle show up again in the app's settings menu.
 
 [theme]
-base = "light"
-primaryColor = "#7C3AED"                 # vivid violet - buttons, active tabs, links
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F3FF"     # soft lavender tint for widget backgrounds/cards
-textColor = "#1F1B2E"
-borderColor = "#DDD6FE"
-linkColor = "#7C3AED"
-
+# Mode-independent settings, shared by both light and dark.
 baseRadius = "large"                     # friendly, rounded widgets and containers
 buttonRadius = "large"
 showWidgetBorder = true
@@ -20,6 +16,14 @@ font = "Poppins:https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;60
 headingFont = "Poppins:https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap"
 codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
 baseFontSize = 16
+
+[theme.light]
+primaryColor = "#7C3AED"                 # vivid violet - buttons, active tabs, links
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F3FF"     # soft lavender tint for widget backgrounds/cards
+textColor = "#1F1B2E"
+borderColor = "#DDD6FE"
+linkColor = "#7C3AED"
 
 # Semantic colors, reused for badges and st.success/warning/error accents.
 redColor = "#EF4444"
@@ -43,8 +47,41 @@ chartCategoricalColors = [
     "#F97316",  # surprise - orange
 ]
 
-[theme.sidebar]
+[theme.dark]
+primaryColor = "#A78BFA"                 # lighter violet - keeps contrast on a dark background
+backgroundColor = "#17121F"              # deep plum-black
+secondaryBackgroundColor = "#241B35"
+textColor = "#EDE9FE"
+borderColor = "#3B2E57"
+linkColor = "#A78BFA"
+
+redColor = "#F87171"
+orangeColor = "#FB923C"
+yellowColor = "#FDE047"
+greenColor = "#4ADE80"
+blueColor = "#60A5FA"
+violetColor = "#A78BFA"
+grayColor = "#94A3B8"
+
+# Same 7-color mapping as light mode, brightened for a dark background.
+chartCategoricalColors = [
+    "#F87171",  # angry    - red
+    "#A3E635",  # disgust  - lime green
+    "#A78BFA",  # fear     - violet
+    "#FDE047",  # happy    - gold
+    "#CBD5E1",  # neutral  - slate gray
+    "#60A5FA",  # sad      - blue
+    "#FB923C",  # surprise - orange
+]
+
+[theme.light.sidebar]
 backgroundColor = "#F5F3FF"
 secondaryBackgroundColor = "#EDE9FE"
 primaryColor = "#7C3AED"
 borderColor = "#DDD6FE"
+
+[theme.dark.sidebar]
+backgroundColor = "#1D1730"
+secondaryBackgroundColor = "#2A2140"
+primaryColor = "#A78BFA"
+borderColor = "#3B2E57"

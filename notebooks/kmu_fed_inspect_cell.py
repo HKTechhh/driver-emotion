@@ -132,6 +132,21 @@ else:
         print(f"\n{len(rows)} unique field-0 values (candidate subject IDs): {rows}")
         print(f"{len(cols)} unique field-1 values (candidate class codes): {cols}")
 
+        # Field 0 (numeric) vs. field 2, when field 2 also looks identity-like (few unique
+        # values, all files partitioned cleanly) - resolves whether field 0 and field 2 are
+        # two redundant aliases for the same subject, or genuinely independent variables.
+        if modal_n >= 3:
+            print("\n" + "=" * 70)
+            print("FIELD 2 x FIELD 0 (does each field-2 value map to exactly one field-0 value?)")
+            print("=" * 70)
+            f2_to_f0 = defaultdict(Counter)
+            for _, p in matching:
+                f2_to_f0[p[2]][p[0]] += 1
+            for f2 in sorted(f2_to_f0):
+                mapping = dict(f2_to_f0[f2])
+                tag = "CLEAN (1 field-0 value)" if len(mapping) == 1 else "MIXED (multiple field-0 values!)"
+                print(f"  field2={f2!r}: field0 counts = {mapping}  -> {tag}")
+
         print("\n" + "=" * 70)
         print("IMAGE PROPERTIES (one sample per field-1 value)")
         print("=" * 70)

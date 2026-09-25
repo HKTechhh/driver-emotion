@@ -15,15 +15,42 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-CANDIDATE_ROOTS = [
-    Path("/kaggle/input/kmu-fed"),
-    Path("/kaggle/input/kmu-fed-kmu-facial-expression-dataset"),
-]
-ROOT = next((p for p in CANDIDATE_ROOTS if p.exists()), None)
+INPUT_ROOT = Path("/kaggle/input")
+
+
+def find_kmu_fed_root(input_root: Path) -> "Path | None":
+    """Search under /kaggle/input for a folder that looks like it holds KMU-FED, without
+    assuming a fixed nesting depth - some Kaggle environments mount datasets directly at
+    /kaggle/input/<slug>/, others nest them under /kaggle/input/datasets/<owner>/<slug>/.
+    """
+    for dirpath, dirnames, _ in os.walk(input_root):
+        depth = len(Path(dirpath).relative_to(input_root).parts)
+        if depth > 5:
+            dirnames[:] = []
+            continue
+        if "kmu" in Path(dirpath).name.lower() or "kmu-fed" in [d.lower() for d in dirnames]:
+            for d in dirnames:
+                if "kmu" in d.lower():
+                    return Path(dirpath) / d
+            if "kmu" in Path(dirpath).name.lower():
+                return Path(dirpath)
+    return None
+
+
+ROOT = find_kmu_fed_root(INPUT_ROOT)
 if ROOT is None:
-    print("None of these exist:", [str(p) for p in CANDIDATE_ROOTS])
-    print("Everything under /kaggle/input/:", sorted(os.listdir("/kaggle/input")))
-    print("^ find the KMU-FED folder name above, set ROOT to it, and re-run this cell.")
+    print("Could not find a 'kmu'-named folder anywhere under /kaggle/input (searched 5 levels deep).")
+    print("Full tree under /kaggle/input (depth <= 5), so you can find it by eye:")
+    for dirpath, dirnames, filenames in os.walk(INPUT_ROOT):
+        dirnames.sort()
+        depth = len(Path(dirpath).relative_to(INPUT_ROOT).parts)
+        if depth > 5:
+            dirnames[:] = []
+            continue
+        print(f"{'  ' * depth}{Path(dirpath).relative_to(INPUT_ROOT)}/  "
+              f"({len(dirnames)} subdirs, {len(filenames)} files)")
+    print("\n^ find the KMU-FED folder path above, then set ROOT = Path('/kaggle/input/<that path>') "
+          "and re-run from the 'else' branch below by hand, or just paste the tree back to me.")
 else:
     print(f"Using ROOT = {ROOT}\n")
 

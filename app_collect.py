@@ -1,29 +1,40 @@
-"""Streamlit app for collecting real driver photos/video as labelled training data.
+"""Streamlit app: driver emotion recognition demo + data-collection tool.
 
-This is a local data-collection tool, not a live webcam demo and not for showing a
-supervisor - see `src/realtime.py` for that. Every saved image goes through the exact
-same face detection and preprocessing as training (`src/preprocess.py`) and the live app
-(`src/realtime.py`'s `load_model_for_inference`/`predict_face`, imported here rather than
-duplicated), so a face crop saved here is treated identically once it is used for training.
+Analyses a face from an uploaded image, an uploaded video, or a live browser webcam feed
+(via streamlit-webrtc), with traffic-scenario simulation (reusing the exact corruption
+functions from the project's own robustness study, src/robustness.py's CONDITION_FUNCS) and
+a simple risk/safety heuristic layered on top of the model's prediction. The Image and Video
+tabs can also save the faces they detect as labelled training data.
+
+Every prediction goes through the exact same face detection and preprocessing as training
+(`src/preprocess.py`) and the desktop live app (`src/realtime.py`'s `load_model_for_inference`
+/`predict_face`, imported here rather than duplicated).
 
 Run:
     streamlit run app_collect.py
 
-Nothing is written to disk on any tab until the sidebar consent checkbox is ticked.
+Nothing is written to disk on any tab until the sidebar consent checkbox is ticked, and the
+Real-time video tab never saves anything at all (it is a live view only).
 """
 import csv
 import tempfile
+import threading
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import av
 import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
+from streamlit_webrtc import WebRtcMode, webrtc_streamer
 
 from config import CLASS_NAMES, FER_DIR, MODELS_DIR, REALTIME, RESULTS_DIR, ROOT, SEED
 from src.realtime import build_face_detector, load_model_for_inference, predict_face
+from src.robustness import CONDITION_FUNCS
 from src.utils import ensure_dirs, set_seed
 
 COLLECTED_DIR = ROOT / "data" / "collected"
@@ -41,6 +52,67 @@ EMOTION_BADGE_COLOR = {
     "angry": "red", "disgust": "green", "fear": "violet", "happy": "yellow",
     "neutral": "gray", "sad": "blue", "surprise": "orange",
 }
+
+# ------------------------------------------------------------------- traffic scenarios
+# Each scenario re-applies one condition from the project's own robustness study rather than
+# being decorative styling - src.robustness.CONDITION_FUNCS is the exact function that produced
+# the numbers in paper/paper.md's Table 7, reused here rather than duplicated.
+SCENARIOS = [
+    "Normal Urban Driving", "Congested Traffic", "Highway/Freeway",
+    "Intersection", "Parking Maneuver", "Night Driving",
+]
+SCENARIO_TO_CONDITION = {
+    "Normal Urban Driving": "clean",
+    "Congested Traffic": "occlusion",
+    "Highway/Freeway": "motion_blur",
+    "Intersection": "head_pose",
+    "Parking Maneuver": "glare",
+    "Night Driving": "low_light",
+}
+SCENARIO_EXPLANATION = {
+    "Normal Urban Driving": "No simulated degradation - this is the clean-image baseline.",
+    "Congested Traffic": "Simulates a hand, phone or sunglasses covering about a fifth of the face.",
+    "Highway/Freeway": "Simulates motion and vibration blur from vehicle speed.",
+    "Intersection": "Simulates the driver glancing left/right, up to ±20° off-camera.",
+    "Parking Maneuver": "Simulates glare from low sun or reflections off glass.",
+    "Night Driving": "Simulates low light with sensor noise, as in a night drive or tunnel.",
+}
+# Accuracy lost (percentage points, custom CNN, full FER2013 test set) under each condition -
+# the project's own measured numbers (paper/paper.md Table 7). Used as a fallback wherever
+# results/robustness.csv isn't present locally (e.g. a stripped-down handoff copy of the app).
+PUBLISHED_ACCURACY_LOST = {
+    "clean": 0.0, "low_light": 39.0, "glare": 16.1, "motion_blur": 23.5,
+    "occlusion": 23.2, "head_pose": 0.8,
+}
+
+# A simple, documented heuristic - NOT a validated safety claim. See paper/paper.md Section 6:
+# treat every prediction as a weak, probabilistic cue, never as a fact about the driver.
+RISK_LEVEL = {
+    "angry": "HIGH", "fear": "HIGH", "sad": "MEDIUM", "disgust": "MEDIUM",
+    "surprise": "MEDIUM", "neutral": "LOW", "happy": "LOW",
+}
+RISK_BADGE_COLOR = {"HIGH": "red", "MEDIUM": "orange", "LOW": "green"}
+SAFETY_RECOMMENDATION = {
+    "angry": "Consider pulling over safely and taking a moment before continuing.",
+    "fear": "If something startled you, slow down and reassess before continuing.",
+    "sad": "Reduced alertness has been linked to low mood - stay extra attentive to the road.",
+    "disgust": "No specific driving concern - stay focused on the road.",
+    "surprise": "Stay alert for whatever caused it until it passes.",
+    "neutral": "No specific concern.",
+    "happy": "No specific concern.",
+}
+
+
+@dataclass
+class DetectionSettings:
+    """The sidebar's scenario/threshold/display-toggle choices, threaded through every tab."""
+    scenario: str
+    confidence_threshold: float
+    update_frequency: int
+    show_face_box: bool
+    show_emotion_text: bool
+    show_risk: bool
+    show_scenario_info: bool
 
 
 # --------------------------------------------------------------------------- non-UI helpers
@@ -124,6 +196,64 @@ def fer2013_train_class_counts(fer_dir: Path = FER_DIR) -> Optional[Dict[str, in
     return {cls: len(list((train_dir / cls).glob("*"))) for cls in CLASS_NAMES if (train_dir / cls).exists()}
 
 
+def scenario_condition(scenario: str) -> str:
+    """Map a traffic-scenario label to its src.robustness condition name."""
+    return SCENARIO_TO_CONDITION[scenario]
+
+
+def apply_scenario_corruption(image_bgr: np.ndarray, scenario: str, seed: Optional[int] = None) -> np.ndarray:
+    """Apply the scenario's simulated degradation to a BGR image/frame.
+
+    Reuses `src.robustness.CONDITION_FUNCS` - the exact functions used to measure the
+    robustness numbers in the paper - rather than duplicating the corruption logic. `seed=None`
+    (the default, for an interactive preview) draws a fresh random corruption each call; pass a
+    fixed seed for a reproducible one-off preview.
+    """
+    condition = scenario_condition(scenario)
+    rng = np.random.default_rng(seed)
+    return CONDITION_FUNCS[condition](image_bgr, rng)
+
+
+def compute_risk(emotion: str) -> str:
+    """Return "LOW"/"MEDIUM"/"HIGH" for one predicted emotion (see RISK_LEVEL's docstring note)."""
+    return RISK_LEVEL[emotion]
+
+
+def is_emotion_acceptable(emotion: str) -> bool:
+    """False for the two "alert" emotions (angry, fear) that src/realtime.py also flags."""
+    return RISK_LEVEL[emotion] != "HIGH"
+
+
+def scenario_accuracy_lost(scenario: str, robustness_csv: Path = RESULTS_DIR / "robustness.csv") -> Optional[float]:
+    """Percentage points of custom-CNN accuracy lost under this scenario's condition.
+
+    Reads `results/robustness.csv` live if it exists (so this always reflects the most recent
+    run), else falls back to the published paper figures in PUBLISHED_ACCURACY_LOST.
+    """
+    condition = scenario_condition(scenario)
+    path = Path(robustness_csv)
+    if path.exists():
+        try:
+            df = pd.read_csv(path).set_index("condition")
+            if condition in df.index and "clean" in df.index:
+                clean_acc = df.loc["clean", "custom_cnn_accuracy"]
+                cond_acc = df.loc[condition, "custom_cnn_accuracy"]
+                return round((clean_acc - cond_acc) * 100, 1)
+        except Exception:
+            pass
+    return PUBLISHED_ACCURACY_LOST.get(condition)
+
+
+def scenario_complexity(scenario: str) -> str:
+    """"LOW"/"MEDIUM"/"HIGH", from how much accuracy the custom CNN loses under this scenario."""
+    lost = scenario_accuracy_lost(scenario)
+    if lost is None or lost < 5:
+        return "LOW"
+    if lost < 20:
+        return "MEDIUM"
+    return "HIGH"
+
+
 def _save_and_log(
     crop_bgr: np.ndarray, label: str, filename_stem: str, *, source: str, original_filename: str,
     model_used: str, predicted_emotion: str, confidence: float, corrected_label: str,
@@ -153,6 +283,33 @@ def _decode_uploaded_image(uploaded_file) -> Optional[np.ndarray]:
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
 
 
+def _draw_overlay(img: np.ndarray, box: Tuple[int, int, int, int], emotion: str, confidence: float,
+                   risk: str, scenario: str, settings: DetectionSettings) -> None:
+    """Draw the box/emotion/risk/scenario overlay onto `img` in place, per the display toggles."""
+    x, y, w, h = box
+    if settings.show_face_box:
+        cv2.rectangle(img, (x, y), (x + w, y + h), (139, 92, 246), 2)
+    y_text = max(20, y - 10)
+    if settings.show_emotion_text:
+        cv2.putText(img, f"{emotion.upper()}: {confidence * 100:.2f}%", (x, y_text),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+        y_text += 26
+    if settings.show_risk:
+        cv2.putText(img, f"Risk: {risk}", (x, y_text), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (255, 255, 255), 2, cv2.LINE_AA)
+        y_text += 22
+    if settings.show_scenario_info:
+        cv2.putText(img, f"Scenario: {scenario.upper()}", (x, y_text), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, (200, 200, 200), 1, cv2.LINE_AA)
+
+
+def _record_session_stat(emotion: str) -> None:
+    """Bump this browser session's running analyzed-count and per-emotion tally (sidebar)."""
+    stats = st.session_state.session_stats
+    stats["analyzed"] += 1
+    stats["emotion_counts"][emotion] += 1
+
+
 # --------------------------------------------------------------------------- Streamlit UI
 
 @st.cache_resource(show_spinner="Loading model...")
@@ -165,7 +322,10 @@ def _cached_detector():
     return build_face_detector(REALTIME["min_face_confidence"])
 
 
-def _render_image_tab(model, model_family: str, img_size: int, detect_fn, model_name: str, consent: bool) -> None:
+def _render_image_tab(
+    model, model_family: str, img_size: int, detect_fn, model_name: str, consent: bool,
+    settings: DetectionSettings,
+) -> None:
     st.subheader("Upload images", icon=":material/photo_camera:")
     files = st.file_uploader("Images (JPG/PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
     if not files:
@@ -180,21 +340,55 @@ def _render_image_tab(model, model_family: str, img_size: int, detect_fn, model_
                 st.warning(f"**{file.name}** - could not read this file as an image, skipped.")
                 continue
 
-            result = predict_face(image_bgr, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
-            if result is None:
+            # Inference always runs once on the clean image (its crop is what gets saved, so a
+            # scenario preview never pollutes the training set with an artificially degraded
+            # photo), plus a second pass on the scenario-corrupted copy when one is selected -
+            # that second pass is what's *shown*, since the whole point is to demonstrate how
+            # the model's own behaviour changes under that condition.
+            clean_result = predict_face(image_bgr, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
+            if clean_result is None:
                 st.warning(f"**{file.name}** - no face detected, skipped.")
                 continue
 
-            x, y, w, h = result["box"]
-            probs = result["probs"]
+            preview_bgr, display_result = image_bgr, clean_result
+            if settings.scenario != "Normal Urban Driving":
+                preview_bgr = apply_scenario_corruption(image_bgr, settings.scenario)
+                corrupted = predict_face(preview_bgr, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
+                if corrupted is not None:
+                    display_result = corrupted
+                else:
+                    st.caption("The face detector couldn't find a face in the scenario-corrupted "
+                               "preview - showing the clean-image result instead.")
+                    preview_bgr = image_bgr
+
+            x, y, w, h = display_result["box"]
+            probs = display_result["probs"]
             top_idx = int(np.argmax(probs))
             predicted, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+            confident = confidence >= settings.confidence_threshold
+            _record_session_stat(predicted)
 
-            annotated = image_bgr.copy()
-            cv2.rectangle(annotated, (x, y), (x + w, y + h), (139, 92, 246), 3)  # violet, matches the theme
+            annotated = preview_bgr.copy()
+            risk = compute_risk(predicted)
+            if confident:
+                _draw_overlay(annotated, (x, y, w, h), predicted, confidence, risk, settings.scenario, settings)
+            elif settings.show_face_box:
+                cv2.rectangle(annotated, (x, y), (x + w, y + h), (148, 163, 184), 2)
 
             st.markdown(f"**{file.name}**")
-            st.badge(f"{predicted} · {confidence * 100:.0f}%", color=EMOTION_BADGE_COLOR[predicted])
+            if settings.show_scenario_info and settings.scenario != "Normal Urban Driving":
+                st.caption(f"Scenario preview: *{settings.scenario}* - {SCENARIO_EXPLANATION[settings.scenario]}")
+
+            if settings.show_emotion_text:
+                if confident:
+                    st.badge(f"{predicted} · {confidence * 100:.0f}%", color=EMOTION_BADGE_COLOR[predicted])
+                else:
+                    st.badge(
+                        f"Uncertain · {confidence * 100:.0f}% (below {settings.confidence_threshold:.0%} threshold)",
+                        color="gray",
+                    )
+            if settings.show_risk and confident:
+                st.badge(f"Risk: {risk}", color=RISK_BADGE_COLOR[risk])
 
             col_img, col_chart = st.columns(2)
             with col_img:
@@ -202,19 +396,32 @@ def _render_image_tab(model, model_family: str, img_size: int, detect_fn, model_
             with col_chart:
                 st.bar_chart(pd.Series(probs, index=CLASS_NAMES, name="probability"))
 
+            if confident:
+                with st.container(border=True):
+                    st.markdown("**Scenario-specific analysis**")
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if is_emotion_acceptable(predicted):
+                            st.success("Acceptable emotion for this scenario", icon=":material/check_circle:")
+                        else:
+                            st.warning("Elevated-risk emotion for this scenario", icon=":material/warning:")
+                    with col_b:
+                        st.metric("Scenario complexity", scenario_complexity(settings.scenario))
+                    st.caption(f"Safety note: {SAFETY_RECOMMENDATION[predicted]}")
+
             correction = st.selectbox("Correct label if wrong", [KEEP_PREDICTION] + CLASS_NAMES, key=f"correct_{i}")
             corrected_label = "" if correction == KEEP_PREDICTION else correction
             label = corrected_label or predicted
 
             if st.button("Save to dataset", icon=":material/save:", key=f"save_{i}", disabled=not consent):
                 _save_and_log(
-                    result["crop"], label, file.name, source="image_upload", original_filename=file.name,
+                    clean_result["crop"], label, file.name, source="image_upload", original_filename=file.name,
                     model_used=model_name, predicted_emotion=predicted, confidence=confidence,
                     corrected_label=corrected_label,
                 )
                 st.success(f"Saved to data/collected/{label}/", icon=":material/check_circle:")
 
-            pending.append((result["crop"], label, file.name, predicted, confidence, corrected_label))
+            pending.append((clean_result["crop"], label, file.name, predicted, confidence, corrected_label))
 
     if pending and st.button(
         f"Save all {len(pending)} image(s) above", icon=":material/save:", type="primary", disabled=not consent,
@@ -228,7 +435,10 @@ def _render_image_tab(model, model_family: str, img_size: int, detect_fn, model_
         st.success(f"Saved {len(pending)} image(s).", icon=":material/check_circle:")
 
 
-def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_name: str, consent: bool) -> None:
+def _render_video_tab(
+    model, model_family: str, img_size: int, detect_fn, model_name: str, consent: bool,
+    settings: DetectionSettings,
+) -> None:
     st.subheader("Upload a video", icon=":material/videocam:")
     video_file = st.file_uploader("Video (MP4/MOV/AVI)", type=["mp4", "mov", "avi"])
     every_n = st.number_input("Sample every N frames", min_value=1, value=15, step=1)
@@ -239,6 +449,10 @@ def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_
         return
     if not consent:
         st.warning("Consent isn't checked, so frames will be analysed but nothing will be saved.")
+    if settings.scenario != "Normal Urban Driving":
+        st.caption(f"Scenario preview: *{settings.scenario}* - {SCENARIO_EXPLANATION[settings.scenario]} "
+                   "Each sampled frame is analysed twice (clean, for saving, and scenario-corrupted, "
+                   "for the stats below), so this runs slower than Normal Urban Driving.")
 
     with tempfile.NamedTemporaryFile(suffix=Path(video_file.name).suffix, delete=False) as tmp:
         tmp.write(video_file.getvalue())
@@ -265,28 +479,42 @@ def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_
 
         emotion_counts = {c: 0 for c in CLASS_NAMES}
         top_emotion_indices: List[int] = []
-        n_sampled = n_saved = 0
+        n_sampled = n_saved = n_uncertain = 0
 
         for frame_index, frame in sample_video_frames(tmp_path, int(every_n)):
             n_sampled += 1
-            result = predict_face(frame, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
-            if result is not None:
-                probs = result["probs"]
-                top_idx = int(np.argmax(probs))
-                predicted, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+            clean_result = predict_face(frame, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
+            if clean_result is None:
+                progress.progress(min(frame_index / total_frames, 1.0))
+                continue
+
+            display_result = clean_result
+            if settings.scenario != "Normal Urban Driving":
+                corrupted_frame = apply_scenario_corruption(frame, settings.scenario)
+                corrupted = predict_face(corrupted_frame, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
+                if corrupted is not None:
+                    display_result = corrupted
+
+            probs = display_result["probs"]
+            top_idx = int(np.argmax(probs))
+            predicted, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+
+            if confidence >= settings.confidence_threshold:
                 emotion_counts[predicted] += 1
                 top_emotion_indices.append(top_idx)
+                _record_session_stat(predicted)
 
                 if consent:
                     _save_and_log(
-                        result["crop"], predicted, f"frame{frame_index}", source="video_upload",
+                        clean_result["crop"], predicted, f"frame{frame_index}", source="video_upload",
                         original_filename=video_file.name, model_used=model_name,
                         predicted_emotion=predicted, confidence=confidence, corrected_label="",
                     )
                     n_saved += 1
-
                 bar_placeholder.bar_chart(pd.Series(emotion_counts, name="count"))
                 line_placeholder.line_chart(pd.Series(top_emotion_indices, name="top class index"))
+            else:
+                n_uncertain += 1
             progress.progress(min(frame_index / total_frames, 1.0))
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -295,11 +523,122 @@ def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_
     with st.container(horizontal=True):
         st.metric("Frames sampled", n_sampled, border=True)
         st.metric("Frames saved", n_saved, border=True)
+        st.metric("Below confidence threshold", n_uncertain, border=True)
     st.caption(
         "No per-frame correction UI here (too slow for video): filenames carry the model's "
         "predicted emotion, which is a sorting hint for manual review, not verified ground truth."
     )
     st.caption("Top-class-index legend: " + ", ".join(f"{i}={c}" for i, c in enumerate(CLASS_NAMES)))
+
+
+class _LiveStats:
+    """Thread-safe box for the real-time tab's live stats.
+
+    `webrtc_streamer`'s video_frame_callback runs on a background WebRTC thread, not the main
+    Streamlit script thread, so writing straight to st.session_state from inside it is not
+    safe. This tiny lock-protected object is the standard streamlit-webrtc pattern for sharing
+    a value from that thread back to the main script, which reads it via `snapshot()`.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.frame_count = 0
+        self.emotion: Optional[str] = None
+        self.confidence: float = 0.0
+        self.risk: Optional[str] = None
+
+    def update(self, emotion: str, confidence: float, risk: str) -> None:
+        with self._lock:
+            self.frame_count += 1
+            self.emotion, self.confidence, self.risk = emotion, confidence, risk
+
+    def snapshot(self) -> Tuple[int, Optional[str], float, Optional[str]]:
+        with self._lock:
+            return self.frame_count, self.emotion, self.confidence, self.risk
+
+
+@st.cache_resource
+def _live_stats() -> _LiveStats:
+    return _LiveStats()
+
+
+def _make_realtime_callback(model, model_family: str, img_size: int, detect_fn, settings: DetectionSettings, stats: _LiveStats):
+    """Build the per-frame callback for webrtc_streamer: corrupt (if a scenario is active),
+    run inference every `update_frequency`-th frame, draw the last known overlay every frame.
+    """
+    state = {"n": 0, "box": None, "emotion": None, "confidence": 0.0, "risk": None}
+
+    def callback(frame: av.VideoFrame) -> av.VideoFrame:
+        img = frame.to_ndarray(format="bgr24")
+        state["n"] += 1
+
+        if settings.scenario != "Normal Urban Driving":
+            img = apply_scenario_corruption(img, settings.scenario)
+
+        if state["n"] % settings.update_frequency == 0:
+            result = predict_face(img, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
+            if result is not None:
+                probs = result["probs"]
+                top_idx = int(np.argmax(probs))
+                emotion, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+                if confidence >= settings.confidence_threshold:
+                    risk = compute_risk(emotion)
+                    state.update(box=result["box"], emotion=emotion, confidence=confidence, risk=risk)
+                    stats.update(emotion, confidence, risk)
+
+        if state["box"] is not None:
+            _draw_overlay(img, state["box"], state["emotion"], state["confidence"], state["risk"],
+                          settings.scenario, settings)
+
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+    return callback
+
+
+def _render_realtime_tab(model, model_family: str, img_size: int, detect_fn, settings: DetectionSettings) -> None:
+    st.subheader("Real-time video analysis", icon=":material/videocam:")
+    st.caption(
+        "Analyze emotions live from your webcam, with traffic-scenario context. Runs entirely "
+        "in this browser tab - nothing here is ever saved to disk."
+    )
+
+    stats = _live_stats()
+    col_video, col_controls = st.columns([2, 1])
+
+    with col_video:
+        ctx = webrtc_streamer(
+            key="driver-emotion-realtime",
+            mode=WebRtcMode.SENDRECV,
+            media_stream_constraints={"video": True, "audio": False},
+            video_frame_callback=_make_realtime_callback(model, model_family, img_size, detect_fn, settings, stats),
+            async_processing=True,
+        )
+
+    with col_controls:
+        with st.container(border=True):
+            st.markdown("**Controls**")
+            emotion_slot, confidence_slot, risk_slot, frames_slot = st.empty(), st.empty(), st.empty(), st.empty()
+
+    if not ctx.state.playing:
+        emotion_slot.metric("Current emotion", "-")
+        confidence_slot.metric("Confidence", "-")
+        frames_slot.caption("Click \"Start\" above to begin.")
+        return
+
+    # Poll the shared stats a few times a second while the stream is live, so this panel
+    # updates without the visitor needing to click anything else. The loop exits as soon as
+    # the stream does (Stop clicked, or the tab disconnects); the large bound is only a safety
+    # net so a genuinely long session isn't cut short, and so this can never hang forever.
+    for _ in range(12_000):  # ~1 hour at 0.3s/tick
+        if not ctx.state.playing:
+            break
+        frame_count, emotion, confidence, risk = stats.snapshot()
+        emotion_slot.metric("Current emotion", (emotion or "-").upper())
+        confidence_slot.metric("Confidence", f"{confidence * 100:.1f}%" if emotion else "-")
+        if risk:
+            risk_slot.badge(f"Risk: {risk}", color=RISK_BADGE_COLOR[risk])
+        frames_slot.caption(f"Frames processed: {frame_count}")
+        time.sleep(0.3)
 
 
 def _render_analytics_tab() -> None:
@@ -359,19 +698,90 @@ def _render_analytics_tab() -> None:
         st.dataframe(filtered.sort_values("timestamp", ascending=False).head(20))
 
 
+def _render_about_tab() -> None:
+    st.subheader("About this project", icon=":material/info:")
+    st.markdown(
+        "This tool analyses a driver's facial expression from an image, a video, or a live "
+        "webcam feed, using one of two models trained from scratch on FER2013: a compact "
+        "custom CNN and a fine-tuned VGG16."
+    )
+    with st.container(border=True):
+        st.markdown("**Measured results (full FER2013 test set, 7,178 images)**")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.metric("Custom CNN accuracy", "67.5%", border=True)
+            st.metric("Custom CNN speed", "~25 FPS (CPU)", border=True)
+        with col_b:
+            st.metric("VGG16 accuracy", "65.8%", border=True)
+            st.metric("VGG16 speed", "~4.6 FPS (CPU)", border=True)
+        st.caption(
+            "The accuracy gap is small but statistically significant (paired bootstrap 95% CI "
+            "+0.7 to +2.8 points; exact McNemar p = 0.0014)."
+        )
+    st.markdown(
+        "**Traffic scenarios** simulate driving conditions from the project's own robustness "
+        "study rather than being decorative: each one reapplies the exact corruption function "
+        "used to measure how much accuracy the models lose in that condition."
+    )
+    st.markdown(
+        "**Data collection.** The Image and Video tabs can optionally save the faces they "
+        "detect to `data/collected/`, gated on the sidebar consent checkbox - nothing is saved "
+        "by default, and nothing from the Real-time video tab is ever saved."
+    )
+    st.caption(
+        "This is a research prototype, not a certified safety system. Treat every prediction, "
+        "risk level and recommendation here as a weak, probabilistic cue - never as a fact "
+        "about the driver."
+    )
+
+
 def main() -> None:
-    """Build the sidebar (model choice + consent) and the three data-collection tabs."""
+    """Build the sidebar (scenario, detection settings, model choice, consent) and the tabs."""
     set_seed(SEED)
     ensure_dirs()
     st.set_page_config(page_title="Driver emotion - data collection", page_icon=":material/mood:", layout="wide")
-    st.title("Driver emotion data collection", icon=":material/mood:")
+    st.title("Driver emotion recognition system", icon=":material/mood:")
     st.caption(
-        "A tool for building a labelled dataset from real photos/video - not a live webcam demo. "
-        "Every save uses the same face detection and preprocessing as training."
+        "AI-powered emotion detection for multiple traffic scenarios. Every save uses the "
+        "same face detection and preprocessing as training."
     )
+
+    if "session_stats" not in st.session_state:
+        st.session_state.session_stats = {"analyzed": 0, "emotion_counts": {c: 0 for c in CLASS_NAMES}}
 
     with st.sidebar:
         st.header("Settings", icon=":material/tune:")
+
+        st.subheader("Traffic scenario", icon=":material/directions_car:")
+        scenario = st.selectbox("Select current scenario", SCENARIOS, index=0)
+        with st.expander("How this scenario works differently"):
+            st.write(SCENARIO_EXPLANATION[scenario])
+            lost = scenario_accuracy_lost(scenario)
+            if lost:
+                st.caption(f"Measured effect: the custom CNN lost about {lost:.1f} accuracy "
+                           "points under this condition in the project's own robustness study.")
+            else:
+                st.caption("No measured effect (this is the clean-image baseline).")
+
+        st.subheader("Detection settings", icon=":material/settings_input_component:")
+        update_frequency = st.slider(
+            "Update frequency (frames)", 1, 10, 5,
+            help="Real-time video tab only: run full inference once every N frames.",
+        )
+        confidence_threshold = st.slider("Confidence threshold", 0.0, 1.0, 0.30, step=0.05)
+
+        st.subheader("Display options", icon=":material/visibility:")
+        show_face_box = st.checkbox("Show face detection box", value=True)
+        show_emotion_text = st.checkbox("Show emotion text", value=True)
+        show_risk = st.checkbox("Show risk indicator", value=True)
+        show_scenario_info = st.checkbox("Show scenario info", value=True)
+
+        settings = DetectionSettings(
+            scenario, confidence_threshold, update_frequency,
+            show_face_box, show_emotion_text, show_risk, show_scenario_info,
+        )
+
+        st.subheader("Model", icon=":material/memory:")
         model_names = list_available_models()
         if not model_names:
             st.error(f"No .keras models found in {MODELS_DIR}/. Add one and reload the page.")
@@ -386,6 +796,12 @@ def main() -> None:
         else:
             st.badge("Saving disabled", icon=":material/lock:", color="red")
 
+        st.subheader("Session statistics", icon=":material/bar_chart:")
+        stats = st.session_state.session_stats
+        st.metric("Images/frames analyzed", stats["analyzed"])
+        if stats["analyzed"]:
+            st.bar_chart(pd.Series(stats["emotion_counts"]).reindex(CLASS_NAMES, fill_value=0), height=150)
+
     model_path = MODELS_DIR / f"{selected}.keras"
     try:
         model, img_size = _cached_model(str(model_path))
@@ -397,17 +813,23 @@ def main() -> None:
     with st.sidebar:
         st.badge(f"Preprocessing: {model_family}", icon=":material/memory:", color="violet")
 
-    tab_images, tab_video, tab_analytics = st.tabs([
+    tab_images, tab_realtime, tab_video, tab_analytics, tab_about = st.tabs([
         ":material/photo_camera: Image upload",
-        ":material/videocam: Video upload",
+        ":material/videocam: Real-time video",
+        ":material/upload_file: Video upload",
         ":material/query_stats: Analytics dashboard",
+        ":material/info: About",
     ])
     with tab_images:
-        _render_image_tab(model, model_family, img_size, detect_fn, selected, consent)
+        _render_image_tab(model, model_family, img_size, detect_fn, selected, consent, settings)
+    with tab_realtime:
+        _render_realtime_tab(model, model_family, img_size, detect_fn, settings)
     with tab_video:
-        _render_video_tab(model, model_family, img_size, detect_fn, selected, consent)
+        _render_video_tab(model, model_family, img_size, detect_fn, selected, consent, settings)
     with tab_analytics:
         _render_analytics_tab()
+    with tab_about:
+        _render_about_tab()
 
 
 if __name__ == "__main__":

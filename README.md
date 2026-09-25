@@ -221,6 +221,23 @@ or correct them by eye before adding them to a dataset.
 (training) and `src/realtime.py` (live inference), so a camera frame is always treated
 exactly like a training image.
 
+### Browser demo / data-collection app (`app_collect.py`)
+
+```bash
+streamlit run app_collect.py
+```
+
+A Streamlit dashboard with five tabs: **Image upload** and **Video upload** (run inference,
+optionally correct the label, and save the face to `data/collected/` once the sidebar consent
+checkbox is ticked), **Real-time video** (live webcam analysis in the browser via
+`streamlit-webrtc` - view only, nothing is ever saved from this tab), **Analytics dashboard**
+(what's been collected so far vs. FER2013's own class balance), and **About**. The sidebar's
+six **traffic scenarios** (Night Driving, Highway/Freeway, etc.) each reapply one condition
+from `src/robustness.py`'s `CONDITION_FUNCS` - the same functions used to measure the paper's
+robustness numbers - to preview how the model's own accuracy changes under that condition,
+plus a simple, clearly-labelled risk/safety heuristic (not a validated safety claim). Reuses
+`src/realtime.py`'s `load_model_for_inference`/`predict_face` rather than duplicating them.
+
 ## Project layout
 
 ```text

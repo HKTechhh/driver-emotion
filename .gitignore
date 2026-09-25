@@ -22,3 +22,7 @@ paper/.~lock.*
 docs/car_deployment_guide.docx
 docs/car_deployment_guide.pdf
 docs/.~lock.*
+
+# a reference zip + extracted screenshots (someone's photo, a colleague's remote-desktop
+# session) dropped into the repo for inspiration - personal, never committed
+html web guide/

@@ -49,8 +49,14 @@ def _apply_low_light(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 def _apply_glare(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Sun glare through a windshield: brightness x1.6 plus a random bright elliptical blob."""
-    h, w = img.shape
+    """Sun glare through a windshield: brightness x1.6 plus a random bright elliptical blob.
+
+    Works on grayscale (H, W) or color (H, W, 3) input - `shape[:2]` and the trailing-axis
+    check are no-ops for the grayscale case this was written for, so this is unchanged for
+    every existing caller (src.gradcam, src.robustness itself); it only adds the ability to
+    corrupt a color frame too, for app_collect.py's live scenario preview.
+    """
+    h, w = img.shape[:2]
     out = np.clip(img.astype(np.float32) * 1.6, 0, 255)
 
     mask = np.zeros((h, w), dtype=np.float32)
@@ -61,6 +67,8 @@ def _apply_glare(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     mask = cv2.GaussianBlur(mask, (9, 9), 0)
     if mask.max() > 0:
         mask = mask / mask.max()
+    if img.ndim == 3:
+        mask = mask[..., np.newaxis]
 
     return np.clip(out + mask * 120, 0, 255).astype(np.uint8)
 
@@ -73,8 +81,12 @@ def _apply_motion_blur(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 def _apply_occlusion(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """A hand or sunglasses covering part of the face: a random black rectangle over ~20% of it."""
-    h, w = img.shape
+    """A hand or sunglasses covering part of the face: a random black rectangle over ~20% of it.
+
+    `shape[:2]` is a no-op for the grayscale (H, W) input every existing caller passes; it
+    only additionally allows a color (H, W, 3) frame, for app_collect.py's live preview.
+    """
+    h, w = img.shape[:2]
     out = img.copy()
     rect_w, rect_h = int(w * np.sqrt(0.2)), int(h * np.sqrt(0.2))
     x = int(rng.integers(0, max(1, w - rect_w)))
@@ -84,8 +96,12 @@ def _apply_occlusion(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 def _apply_head_pose(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """A driver glancing away: random rotation within +/-20 degrees."""
-    h, w = img.shape
+    """A driver glancing away: random rotation within +/-20 degrees.
+
+    `shape[:2]` is a no-op for the grayscale (H, W) input every existing caller passes; it
+    only additionally allows a color (H, W, 3) frame, for app_collect.py's live preview.
+    """
+    h, w = img.shape[:2]
     angle = float(rng.uniform(-20, 20))
     matrix = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
     return cv2.warpAffine(img, matrix, (w, h), borderMode=cv2.BORDER_REPLICATE)

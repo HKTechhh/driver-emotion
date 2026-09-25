@@ -16,16 +16,19 @@ from app_collect import (
     fer2013_train_class_counts,
     infer_model_family,
     list_available_models,
+    model_class_names,
     sample_video_frames,
     save_crop,
 )
 
 
 class _FakeModel:
-    """Stands in for a tf.keras.Model just enough for infer_model_family (reads input_shape)."""
+    """Stands in for a tf.keras.Model just enough for infer_model_family/model_class_names
+    (reads input_shape/output_shape)."""
 
-    def __init__(self, channels: int):
+    def __init__(self, channels: int = 1, output_units: int = config.NUM_CLASSES):
         self.input_shape = (None, 48, 48, channels)
+        self.output_shape = (None, output_units)
 
 
 def test_infer_model_family_grayscale_and_rgb() -> None:
@@ -103,3 +106,21 @@ def test_predict_and_save_pipeline_on_a_real_sample_image(tmp_path) -> None:
 
     saved = save_crop(result["crop"], "happy", sample_path.name, dest_root=tmp_path)
     assert saved.exists()
+
+
+def test_model_class_names_seven_units_is_fer2013() -> None:
+    assert model_class_names(_FakeModel(output_units=7)) == config.CLASS_NAMES
+
+
+def test_model_class_names_six_units_is_fer2013_minus_neutral() -> None:
+    """A KMU-FED fine-tuned model (src/kmu_fed_data.py) has a 6-unit head; its classes must
+    line up, in order, with FER2013's classes minus "neutral" for every badge/risk/colour
+    lookup in this file (all keyed by those same names) to keep working unchanged."""
+    names = model_class_names(_FakeModel(output_units=6))
+    assert names == ["angry", "disgust", "fear", "happy", "sad", "surprise"]
+    assert "neutral" not in names
+
+
+def test_model_class_names_unsupported_unit_count_raises() -> None:
+    with pytest.raises(ValueError):
+        model_class_names(_FakeModel(output_units=10))

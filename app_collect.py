@@ -32,7 +32,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
 
-from config import CLASS_NAMES, FER_DIR, MODELS_DIR, REALTIME, RESULTS_DIR, ROOT, SEED
+from config import CLASS_NAMES, FER_DIR, MODELS_DIR, NUM_CLASSES, REALTIME, RESULTS_DIR, ROOT, SEED
 from src.realtime import build_face_detector, load_model_for_inference, predict_face
 from src.robustness import CONDITION_FUNCS
 from src.utils import ensure_dirs, set_seed
@@ -141,6 +141,28 @@ def infer_model_family(model) -> str:
     raise ValueError(
         f"No preprocessing is defined for a model with {channels} input channels. "
         "Add a case to src/preprocess.py's preprocess() (and here) for this model family first."
+    )
+
+
+def model_class_names(model) -> List[str]:
+    """The class name for each of `model`'s output units, in order, from its output shape.
+
+    7 units -> CLASS_NAMES (FER2013, includes "neutral"). 6 units -> CLASS_NAMES minus
+    "neutral" - a KMU-FED fine-tuned model (src/kmu_fed_data.py, config.KMU_FED), whose 6
+    classes correspond 1:1, in the same alphabetical order, to FER2013's classes minus
+    neutral (AN=angry, DI=disgust, FE=fear, HA=happy, SA=sad, SU=surprise). This is what lets
+    a 6-class model drop straight into every EMOTION_BADGE_COLOR/RISK_LEVEL/
+    SAFETY_RECOMMENDATION lookup below unchanged: they're all keyed by these same names, and
+    a 6-class model's predictions are always a valid subset of them.
+    """
+    units = model.output_shape[-1]
+    if units == NUM_CLASSES:
+        return CLASS_NAMES
+    if units == NUM_CLASSES - 1:
+        return [c for c in CLASS_NAMES if c != "neutral"]
+    raise ValueError(
+        f"No class-name mapping is defined for a model with {units} output units "
+        f"(expected {NUM_CLASSES} or {NUM_CLASSES - 1})."
     )
 
 
@@ -327,6 +349,7 @@ def _render_image_tab(
     settings: DetectionSettings,
 ) -> None:
     st.subheader("Upload images", icon=":material/photo_camera:")
+    class_names = model_class_names(model)
     files = st.file_uploader("Images (JPG/PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
     if not files:
         st.info("Upload one or more images to run inference.")
@@ -364,7 +387,7 @@ def _render_image_tab(
             x, y, w, h = display_result["box"]
             probs = display_result["probs"]
             top_idx = int(np.argmax(probs))
-            predicted, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+            predicted, confidence = class_names[top_idx], float(probs[top_idx])
             confident = confidence >= settings.confidence_threshold
             _record_session_stat(predicted)
 
@@ -394,7 +417,7 @@ def _render_image_tab(
             with col_img:
                 st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
             with col_chart:
-                st.bar_chart(pd.Series(probs, index=CLASS_NAMES, name="probability"))
+                st.bar_chart(pd.Series(probs, index=class_names, name="probability"))
 
             if confident:
                 with st.container(border=True):
@@ -440,6 +463,7 @@ def _render_video_tab(
     settings: DetectionSettings,
 ) -> None:
     st.subheader("Upload a video", icon=":material/videocam:")
+    class_names = model_class_names(model)
     video_file = st.file_uploader("Video (MP4/MOV/AVI)", type=["mp4", "mov", "avi"])
     every_n = st.number_input("Sample every N frames", min_value=1, value=15, step=1)
     if video_file is None:
@@ -497,7 +521,7 @@ def _render_video_tab(
 
             probs = display_result["probs"]
             top_idx = int(np.argmax(probs))
-            predicted, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+            predicted, confidence = class_names[top_idx], float(probs[top_idx])
 
             if confidence >= settings.confidence_threshold:
                 emotion_counts[predicted] += 1
@@ -566,6 +590,7 @@ def _make_realtime_callback(model, model_family: str, img_size: int, detect_fn, 
     """Build the per-frame callback for webrtc_streamer: corrupt (if a scenario is active),
     run inference every `update_frequency`-th frame, draw the last known overlay every frame.
     """
+    class_names = model_class_names(model)
     state = {"n": 0, "box": None, "emotion": None, "confidence": 0.0, "risk": None}
 
     def callback(frame: av.VideoFrame) -> av.VideoFrame:
@@ -580,7 +605,7 @@ def _make_realtime_callback(model, model_family: str, img_size: int, detect_fn, 
             if result is not None:
                 probs = result["probs"]
                 top_idx = int(np.argmax(probs))
-                emotion, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+                emotion, confidence = class_names[top_idx], float(probs[top_idx])
                 if confidence >= settings.confidence_threshold:
                     risk = compute_risk(emotion)
                     state.update(box=result["box"], emotion=emotion, confidence=confidence, risk=risk)

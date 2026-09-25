@@ -84,8 +84,86 @@ else:
             class_parent = Path(dirpath)
             break
 
-    if class_parent is None:
-        print("Could not auto-detect a class-folder level - inspect the tree above by hand.")
+    IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
+    flat_files = sorted(f for f in os.listdir(ROOT) if f.lower().endswith(IMAGE_EXTS))
+
+    if class_parent is None and flat_files:
+        # No class-folder structure at all - class/subject must be encoded in the filename
+        # itself instead (e.g. "01_AN_mr_001.jpg"). Parse it empirically rather than guessing
+        # what each underscore-separated field means.
+        print(f"No class folders found, but {len(flat_files)} image files sit directly in "
+              f"{ROOT} - the class (and likely subject) must be encoded in the filename.\n")
+
+        from collections import Counter, defaultdict
+
+        parsed = [(f, Path(f).stem.split("_")) for f in flat_files]
+        field_counts = Counter(len(p) for _, p in parsed)
+        print("=" * 70)
+        print("FILENAME STRUCTURE")
+        print("=" * 70)
+        print(f"Underscore-separated field-count distribution: {dict(field_counts)}")
+        modal_n = field_counts.most_common(1)[0][0]
+        odd_ones = [f for f, p in parsed if len(p) != modal_n]
+        print(f"Modal pattern: {modal_n} fields. Files NOT matching it ({len(odd_ones)}): {odd_ones[:20]}\n")
+
+        matching = [(f, p) for f, p in parsed if len(p) == modal_n]
+        per_field_values = defaultdict(Counter)
+        for _, p in matching:
+            for i, val in enumerate(p):
+                per_field_values[i][val] += 1
+        for i in range(modal_n):
+            vals = per_field_values[i]
+            preview = dict(sorted(vals.items())[:15])
+            print(f"Field {i}: {len(vals)} unique value(s) - {preview}"
+                  f"{' ...' if len(vals) > 15 else ''}")
+
+        # Cross-tab of field 0 (likely subject) x field 1 (likely class), the KMU-FED norm
+        print("\n" + "=" * 70)
+        print("FIELD 0 x FIELD 1 CROSS-TAB (rows = field 0, columns = field 1)")
+        print("=" * 70)
+        cross = defaultdict(Counter)
+        for _, p in matching:
+            if len(p) >= 2:
+                cross[p[0]][p[1]] += 1
+        rows, cols = sorted(cross), sorted({c for r in cross.values() for c in r})
+        print("".ljust(10) + "".join(c.ljust(8) for c in cols))
+        for r in rows:
+            print(r.ljust(10) + "".join(str(cross[r].get(c, 0)).ljust(8) for c in cols))
+        print(f"\n{len(rows)} unique field-0 values (candidate subject IDs): {rows}")
+        print(f"{len(cols)} unique field-1 values (candidate class codes): {cols}")
+
+        print("\n" + "=" * 70)
+        print("IMAGE PROPERTIES (one sample per field-1 value)")
+        print("=" * 70)
+        seen, samples = set(), []
+        for f, p in matching:
+            cls = p[1] if len(p) >= 2 else "?"
+            if cls in seen:
+                continue
+            seen.add(cls)
+            img = Image.open(ROOT / f)
+            arr = np.array(img)
+            print(f"  {cls} ({f}): mode={img.mode}, size={img.size}, dtype={arr.dtype}, "
+                  f"min={arr.min()}, max={arr.max()}, mean={arr.mean():.1f}")
+            samples.append((cls, img.convert("RGB")))
+
+        if samples:
+            thumb = 150
+            sheet = Image.new("RGB", (thumb * len(samples), thumb + 20), "white")
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(sheet)
+            for i, (cls, img) in enumerate(samples):
+                img = img.resize((thumb, thumb))
+                sheet.paste(img, (i * thumb, 20))
+                draw.text((i * thumb + 4, 2), cls[:18], fill="black")
+            out_path = "/kaggle/working/kmu_fed_sample_grid.png"
+            sheet.save(out_path)
+            print(f"\nSaved a one-sample-per-value contact sheet to {out_path}")
+            print("Download it from the notebook's Output pane: does it look like true IR/"
+                  "night-vision (grayscale, glowing eyes, flat lighting) or an ordinary daylight photo?")
+    elif class_parent is None:
+        print("Could not auto-detect a class-folder level, and no image files sit directly in "
+              "ROOT either - inspect the tree above by hand.")
     else:
         print(f"Class folders appear to live under: {class_parent}\n")
         class_dirs = sorted(d for d in os.listdir(class_parent) if (class_parent / d).is_dir())

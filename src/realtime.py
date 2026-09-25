@@ -16,6 +16,11 @@ confidence, FPS) - see Section 6 of paper/paper.md. Pass --save-frames to additi
 write each detected face crop to disk (e.g. to grow the training set); this is opt-in and
 was NOT used for any of the results reported in the paper. Get informed consent from
 whoever is on camera before using it (docs/car_deployment_guide.md, Section 8).
+
+`load_model_for_inference` and `predict_face` hold the single-frame detect/preprocess/predict
+path with no temporal smoothing, drawing or logging; `process_frame` (below) adds those for
+this live app, and `app_collect.py` (Streamlit data-collection tool) imports the same two
+functions directly, so both stay in exact sync with training's preprocessing.
 """
 import argparse
 import csv
@@ -180,6 +185,43 @@ def _draw_probability_bars(frame: np.ndarray, probs: np.ndarray, origin: Tuple[i
         )
 
 
+def load_model_for_inference(model_path: str) -> Tuple[tf.keras.Model, int]:
+    """Load a saved .keras model and return it with its expected square input size."""
+    model = tf.keras.models.load_model(model_path)
+    img_size = model.input_shape[1]
+    return model, img_size
+
+
+def predict_face(
+    frame_bgr: np.ndarray,
+    detect_fn: DetectFn,
+    model: tf.keras.Model,
+    model_name: str,
+    img_size: int,
+    face_padding: float,
+) -> Optional[dict]:
+    """Detect the largest face, crop, preprocess and predict, for one frame - no smoothing,
+    drawing or logging (that's `process_frame`, below, for the live app).
+
+    Returns None if no face was found, else a dict: {"box": (x, y, w, h), "crop": the raw BGR
+    face crop before grayscale/resize, "probs": per-class probabilities in CLASS_NAMES order}.
+    """
+    boxes = detect_fn(frame_bgr)
+    if not boxes:
+        return None
+
+    x, y, w, h, _conf = max(boxes, key=lambda b: b[2] * b[3])
+    crop = _crop_with_padding(frame_bgr, (x, y, w, h), face_padding)
+    if crop.size == 0:
+        return None
+
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    resized = cv2.resize(gray, (img_size, img_size), interpolation=cv2.INTER_AREA)
+    model_input = preprocess(resized[np.newaxis, ..., np.newaxis], model_name)
+    probs = np.asarray(model(model_input, training=False))[0]
+    return {"box": (x, y, w, h), "crop": crop, "probs": probs}
+
+
 def process_frame(
     frame_bgr: np.ndarray,
     detect_fn: DetectFn,
@@ -198,25 +240,17 @@ def process_frame(
     single static frame.
     """
     annotated = frame_bgr.copy()
-    boxes = detect_fn(frame_bgr)
-    if not boxes:
+    result = predict_face(frame_bgr, detect_fn, model, model_name, img_size, face_padding)
+    if result is None:
         cv2.putText(
             annotated, "No face detected", (10, annotated.shape[0] - 10),
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA,
         )
         return annotated, None, None
 
-    x, y, w, h, _conf = max(boxes, key=lambda b: b[2] * b[3])
-    crop = _crop_with_padding(frame_bgr, (x, y, w, h), face_padding)
-    if crop.size == 0:
-        return annotated, None, None
-
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    resized = cv2.resize(gray, (img_size, img_size), interpolation=cv2.INTER_AREA)
-    model_input = preprocess(resized[np.newaxis, ..., np.newaxis], model_name)
-    probs = np.asarray(model(model_input, training=False))[0]
-
-    smoothed, top_emotion, confidence, alert_triggered = tracker.update(probs, time.time())
+    x, y, w, h = result["box"]
+    crop = result["crop"]
+    smoothed, top_emotion, confidence, alert_triggered = tracker.update(result["probs"], time.time())
 
     banner_height = 40
     min_label_y = (banner_height + 20) if alert_triggered else 20
@@ -306,8 +340,7 @@ def main() -> None:
     args = build_arg_parser().parse_args()
     ensure_dirs()
 
-    model = tf.keras.models.load_model(args.model_path)
-    img_size = model.input_shape[1]
+    model, img_size = load_model_for_inference(args.model_path)
     detect_fn = build_face_detector(REALTIME["min_face_confidence"])
     tracker = EmotionTracker(REALTIME["smoothing_window"], REALTIME["alert_emotions"], REALTIME["alert_seconds"])
 

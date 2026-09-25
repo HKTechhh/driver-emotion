@@ -3,7 +3,9 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 data/raw/
+data/collected/      # real photos/frames saved by app_collect.py: never committed
 results/*_frames/    # face crops from --save-frames: real people's photos, never committed
+results/collected_log.csv   # per-machine log of what app_collect.py saved (paths, timestamps)
 models/*.keras
 models/*.h5
 models/*.tflite

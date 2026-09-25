@@ -1,0 +1,50 @@
+# Colorful custom theme for app_collect.py (the data-collection Streamlit app).
+# See docs/car_deployment_guide.md and README.md for the rest of the project - this
+# theme only affects how Streamlit apps in this repo render, nothing else.
+
+[theme]
+base = "light"
+primaryColor = "#7C3AED"                 # vivid violet - buttons, active tabs, links
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F3FF"     # soft lavender tint for widget backgrounds/cards
+textColor = "#1F1B2E"
+borderColor = "#DDD6FE"
+linkColor = "#7C3AED"
+
+baseRadius = "large"                     # friendly, rounded widgets and containers
+buttonRadius = "large"
+showWidgetBorder = true
+showSidebarBorder = true
+
+font = "Poppins:https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+headingFont = "Poppins:https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+baseFontSize = 16
+
+# Semantic colors, reused for badges and st.success/warning/error accents.
+redColor = "#EF4444"
+orangeColor = "#F97316"
+yellowColor = "#FACC15"
+greenColor = "#22C55E"
+blueColor = "#3B82F6"
+violetColor = "#8B5CF6"
+grayColor = "#64748B"
+
+# One vivid, distinct color per class, in CLASS_NAMES order (config.py):
+# angry, disgust, fear, happy, neutral, sad, surprise. Used by every st.bar_chart /
+# st.line_chart in app_collect.py, so a class's color is consistent across every chart.
+chartCategoricalColors = [
+    "#EF4444",  # angry    - red
+    "#84CC16",  # disgust  - lime green
+    "#8B5CF6",  # fear     - violet
+    "#FACC15",  # happy    - gold
+    "#94A3B8",  # neutral  - slate gray
+    "#3B82F6",  # sad      - blue
+    "#F97316",  # surprise - orange
+]
+
+[theme.sidebar]
+backgroundColor = "#F5F3FF"
+secondaryBackgroundColor = "#EDE9FE"
+primaryColor = "#7C3AED"
+borderColor = "#DDD6FE"

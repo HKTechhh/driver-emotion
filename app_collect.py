@@ -35,6 +35,13 @@ LOG_FIELDS = [
 KEEP_PREDICTION = "(use model prediction)"
 VIDEO_SUFFIX_ERROR = "Could not read this video - check it isn't corrupted and try a common format (MP4/MOV/AVI)."
 
+# One badge color per class (Streamlit's named semantic colors - see .streamlit/config.toml,
+# where each is mapped to the same vivid hue used in every chart's chartCategoricalColors).
+EMOTION_BADGE_COLOR = {
+    "angry": "red", "disgust": "green", "fear": "violet", "happy": "yellow",
+    "neutral": "gray", "sad": "blue", "surprise": "orange",
+}
+
 
 # --------------------------------------------------------------------------- non-UI helpers
 # Everything below is plain Python with no `st.*` calls, so tests/test_collect.py can import
@@ -159,7 +166,7 @@ def _cached_detector():
 
 
 def _render_image_tab(model, model_family: str, img_size: int, detect_fn, model_name: str, consent: bool) -> None:
-    st.subheader("Upload images")
+    st.subheader("Upload images", icon=":material/photo_camera:")
     files = st.file_uploader("Images (JPG/PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
     if not files:
         st.info("Upload one or more images to run inference.")
@@ -167,64 +174,68 @@ def _render_image_tab(model, model_family: str, img_size: int, detect_fn, model_
 
     pending = []  # (crop, label, filename, predicted, confidence, corrected_label) for "Save all"
     for i, file in enumerate(files):
-        st.markdown(f"**{file.name}**")
-        image_bgr = _decode_uploaded_image(file)
-        if image_bgr is None:
-            st.warning("Could not read this file as an image - skipped.")
-            continue
+        with st.container(border=True):
+            image_bgr = _decode_uploaded_image(file)
+            if image_bgr is None:
+                st.warning(f"**{file.name}** - could not read this file as an image, skipped.")
+                continue
 
-        result = predict_face(image_bgr, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
-        if result is None:
-            st.warning("No face detected in this image - skipped.")
-            continue
+            result = predict_face(image_bgr, detect_fn, model, model_family, img_size, REALTIME["face_padding"])
+            if result is None:
+                st.warning(f"**{file.name}** - no face detected, skipped.")
+                continue
 
-        x, y, w, h = result["box"]
-        probs = result["probs"]
-        top_idx = int(np.argmax(probs))
-        predicted, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
+            x, y, w, h = result["box"]
+            probs = result["probs"]
+            top_idx = int(np.argmax(probs))
+            predicted, confidence = CLASS_NAMES[top_idx], float(probs[top_idx])
 
-        annotated = image_bgr.copy()
-        cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            annotated = image_bgr.copy()
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), (139, 92, 246), 3)  # violet, matches the theme
 
-        col_img, col_chart = st.columns(2)
-        with col_img:
-            st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption=f"{predicted} ({confidence * 100:.0f}%)")
-        with col_chart:
-            st.bar_chart(pd.Series(probs, index=CLASS_NAMES, name="probability"))
+            st.markdown(f"**{file.name}**")
+            st.badge(f"{predicted} · {confidence * 100:.0f}%", color=EMOTION_BADGE_COLOR[predicted])
 
-        correction = st.selectbox("Correct label if wrong", [KEEP_PREDICTION] + CLASS_NAMES, key=f"correct_{i}")
-        corrected_label = "" if correction == KEEP_PREDICTION else correction
-        label = corrected_label or predicted
+            col_img, col_chart = st.columns(2)
+            with col_img:
+                st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
+            with col_chart:
+                st.bar_chart(pd.Series(probs, index=CLASS_NAMES, name="probability"))
 
-        if st.button(f"Save '{file.name}' to dataset", key=f"save_{i}", disabled=not consent):
-            _save_and_log(
-                result["crop"], label, file.name, source="image_upload", original_filename=file.name,
-                model_used=model_name, predicted_emotion=predicted, confidence=confidence,
-                corrected_label=corrected_label,
-            )
-            st.success(f"Saved to data/collected/{label}/")
+            correction = st.selectbox("Correct label if wrong", [KEEP_PREDICTION] + CLASS_NAMES, key=f"correct_{i}")
+            corrected_label = "" if correction == KEEP_PREDICTION else correction
+            label = corrected_label or predicted
 
-        pending.append((result["crop"], label, file.name, predicted, confidence, corrected_label))
-        st.divider()
+            if st.button("Save to dataset", icon=":material/save:", key=f"save_{i}", disabled=not consent):
+                _save_and_log(
+                    result["crop"], label, file.name, source="image_upload", original_filename=file.name,
+                    model_used=model_name, predicted_emotion=predicted, confidence=confidence,
+                    corrected_label=corrected_label,
+                )
+                st.success(f"Saved to data/collected/{label}/", icon=":material/check_circle:")
 
-    if pending and st.button(f"Save all {len(pending)} image(s) above", disabled=not consent):
+            pending.append((result["crop"], label, file.name, predicted, confidence, corrected_label))
+
+    if pending and st.button(
+        f"Save all {len(pending)} image(s) above", icon=":material/save:", type="primary", disabled=not consent,
+    ):
         for crop, label, filename, predicted, confidence, corrected_label in pending:
             _save_and_log(
                 crop, label, filename, source="image_upload", original_filename=filename,
                 model_used=model_name, predicted_emotion=predicted, confidence=confidence,
                 corrected_label=corrected_label,
             )
-        st.success(f"Saved {len(pending)} image(s).")
+        st.success(f"Saved {len(pending)} image(s).", icon=":material/check_circle:")
 
 
 def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_name: str, consent: bool) -> None:
-    st.subheader("Upload a video")
+    st.subheader("Upload a video", icon=":material/videocam:")
     video_file = st.file_uploader("Video (MP4/MOV/AVI)", type=["mp4", "mov", "avi"])
     every_n = st.number_input("Sample every N frames", min_value=1, value=15, step=1)
     if video_file is None:
         st.info("Upload a video to sample frames from it.")
         return
-    if not st.button("Process video"):
+    if not st.button("Process video", icon=":material/play_arrow:", type="primary"):
         return
     if not consent:
         st.warning("Consent isn't checked, so frames will be analysed but nothing will be saved.")
@@ -242,7 +253,16 @@ def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_
             return
 
         progress = st.progress(0.0)
-        bar_placeholder, line_placeholder = st.empty(), st.empty()
+        col_bar, col_line = st.columns(2)
+        with col_bar:
+            bar_card = st.container(border=True)
+            bar_card.markdown("**Emotion distribution so far**")
+            bar_placeholder = bar_card.empty()
+        with col_line:
+            line_card = st.container(border=True)
+            line_card.markdown("**Top emotion over time**")
+            line_placeholder = line_card.empty()
+
         emotion_counts = {c: 0 for c in CLASS_NAMES}
         top_emotion_indices: List[int] = []
         n_sampled = n_saved = 0
@@ -272,7 +292,9 @@ def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_
         tmp_path.unlink(missing_ok=True)
 
     progress.progress(1.0)
-    st.write(f"Sampled {n_sampled} frame(s) (every {every_n}); saved {n_saved}.")
+    with st.container(horizontal=True):
+        st.metric("Frames sampled", n_sampled, border=True)
+        st.metric("Frames saved", n_saved, border=True)
     st.caption(
         "No per-frame correction UI here (too slow for video): filenames carry the model's "
         "predicted emotion, which is a sorting hint for manual review, not verified ground truth."
@@ -281,10 +303,10 @@ def _render_video_tab(model, model_family: str, img_size: int, detect_fn, model_
 
 
 def _render_analytics_tab() -> None:
-    st.subheader("Collected data so far")
+    st.subheader("Collected data so far", icon=":material/query_stats:")
     if not LOG_PATH.exists():
         st.info(f"No data collected yet ({LOG_PATH} doesn't exist). Save something from the "
-                "Image or Video tab first.")
+                "image or video tab first.")
         return
 
     df = pd.read_csv(LOG_PATH)
@@ -292,51 +314,64 @@ def _render_analytics_tab() -> None:
         st.info("The log file exists but is empty.")
         return
 
-    st.metric("Total collected", len(df))
     label = df["corrected_label"].where(df["corrected_label"].fillna("") != "", df["predicted_emotion"])
+    corrected_share = (df["corrected_label"].fillna("") != "").mean() * 100
+
+    with st.container(horizontal=True):
+        st.metric("Total collected", len(df), border=True)
+        st.metric("Classes represented", label.nunique(), border=True)
+        st.metric("Manually corrected", f"{corrected_share:.0f}%", border=True)
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.write("Collected class distribution")
-        st.bar_chart(label.value_counts().reindex(CLASS_NAMES, fill_value=0))
+        with st.container(border=True):
+            st.markdown("**Collected class distribution**")
+            st.bar_chart(label.value_counts().reindex(CLASS_NAMES, fill_value=0))
     with col_b:
-        st.write("Original FER2013 training distribution (for comparison)")
-        fer_counts = fer2013_train_class_counts()
-        if fer_counts is None:
-            st.info("FER2013 training data not found locally (data/raw/fer2013/train) - skipping.")
-        else:
-            st.bar_chart(pd.Series(fer_counts).reindex(CLASS_NAMES, fill_value=0))
-            st.caption("Compare the two charts to see which classes (often *disgust*) still need more real examples.")
+        with st.container(border=True):
+            st.markdown("**Original FER2013 training distribution**")
+            fer_counts = fer2013_train_class_counts()
+            if fer_counts is None:
+                st.caption("FER2013 training data not found locally (data/raw/fer2013/train) - skipping.")
+            else:
+                st.bar_chart(pd.Series(fer_counts).reindex(CLASS_NAMES, fill_value=0))
+                st.caption("Compare the two charts to see which classes still need more real examples.")
 
-    st.write("Filter")
-    sources = sorted(df["source"].unique())
-    source_filter = st.multiselect("Source", sources, default=sources)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    min_date, max_date = df["timestamp"].min().date(), df["timestamp"].max().date()
-    date_range = st.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    with st.container(border=True):
+        st.markdown("**Filter**", help="Narrows the table below only.")
+        col_source, col_dates = st.columns(2)
+        with col_source:
+            sources = sorted(df["source"].unique())
+            source_filter = st.multiselect("Source", sources, default=sources)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        min_date, max_date = df["timestamp"].min().date(), df["timestamp"].max().date()
+        with col_dates:
+            date_range = st.date_input(
+                "Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date
+            )
 
-    filtered = df[df["source"].isin(source_filter)]
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start, end = date_range
-        filtered = filtered[(filtered["timestamp"].dt.date >= start) & (filtered["timestamp"].dt.date <= end)]
+        filtered = df[df["source"].isin(source_filter)]
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            start, end = date_range
+            filtered = filtered[(filtered["timestamp"].dt.date >= start) & (filtered["timestamp"].dt.date <= end)]
 
-    st.write("Most recent 20 entries")
-    st.dataframe(filtered.sort_values("timestamp", ascending=False).head(20))
+        st.markdown("**Most recent 20 entries**")
+        st.dataframe(filtered.sort_values("timestamp", ascending=False).head(20))
 
 
 def main() -> None:
     """Build the sidebar (model choice + consent) and the three data-collection tabs."""
     set_seed(SEED)
     ensure_dirs()
-    st.set_page_config(page_title="Driver Emotion - Data Collection", layout="wide")
-    st.title("Driver Emotion Recognition - Data Collection")
+    st.set_page_config(page_title="Driver emotion - data collection", page_icon=":material/mood:", layout="wide")
+    st.title("Driver emotion data collection", icon=":material/mood:")
     st.caption(
         "A tool for building a labelled dataset from real photos/video - not a live webcam demo. "
         "Every save uses the same face detection and preprocessing as training."
     )
 
     with st.sidebar:
-        st.header("Settings")
+        st.header("Settings", icon=":material/tune:")
         model_names = list_available_models()
         if not model_names:
             st.error(f"No .keras models found in {MODELS_DIR}/. Add one and reload the page.")
@@ -346,8 +381,10 @@ def main() -> None:
             "I have consent to store these photos/frames for research use.", value=False,
             help="Every save button on every tab stays disabled until this is checked.",
         )
-        if not consent:
-            st.warning("Saving is disabled until consent is confirmed.")
+        if consent:
+            st.badge("Saving enabled", icon=":material/lock_open:", color="green")
+        else:
+            st.badge("Saving disabled", icon=":material/lock:", color="red")
 
     model_path = MODELS_DIR / f"{selected}.keras"
     try:
@@ -357,8 +394,14 @@ def main() -> None:
         st.error(f"Could not load '{selected}': {exc}")
         st.stop()
     detect_fn = _cached_detector()
+    with st.sidebar:
+        st.badge(f"Preprocessing: {model_family}", icon=":material/memory:", color="violet")
 
-    tab_images, tab_video, tab_analytics = st.tabs(["Image Upload", "Video Upload", "Analytics Dashboard"])
+    tab_images, tab_video, tab_analytics = st.tabs([
+        ":material/photo_camera: Image upload",
+        ":material/videocam: Video upload",
+        ":material/query_stats: Analytics dashboard",
+    ])
     with tab_images:
         _render_image_tab(model, model_family, img_size, detect_fn, selected, consent)
     with tab_video:

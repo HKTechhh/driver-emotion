@@ -79,3 +79,24 @@ REALTIME = {
 
 # ---------------------------------------------------------------- Grad-CAM target layers
 GRADCAM_LAYER = {"custom_cnn": "block4_conv2", "vgg16": "block5_conv3"}
+
+# ---------------------------------------------------------------- KMU-FED (in-car domain-gap eval)
+# Ships as 1106 images flat in one folder (no class subfolders), named like
+# "01_AN_mr_001.jpg": <numeric subject alias>_<class code>_<subject initials>_<index>. The
+# numeric alias has a bug - "01" and a malformed "1" are the same person (a dropped leading
+# zero on 6 files) - so src.kmu_fed_data always int()-casts it before grouping. See
+# docs/experiment_log.md for the full Step 0 inspection and the split's reasoning.
+KMU_FED = {
+    "dir": KMU_DIR,
+    "class_names": ["AN", "DI", "FE", "HA", "SA", "SU"],  # no "neutral"; 2-letter codes as shipped
+    "split_seed": 42,
+    "n_train_subjects": 8,
+    "n_val_subjects": 2,
+    "n_test_subjects": 2,
+    # Resolved by src.kmu_fed_data.select_subject_split() (seed 42, first try): only 7 of the 12
+    # subjects contributed any disgust images, so the split is constrained to keep >=1
+    # disgust-covered subject in both val and test, not purely random.
+    "train_subjects": [3, 4, 6, 7, 8, 9, 10, 12],
+    "val_subjects": [1, 5],
+    "test_subjects": [2, 11],
+}

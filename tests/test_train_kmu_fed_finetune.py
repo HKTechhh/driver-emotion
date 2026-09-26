@@ -11,7 +11,9 @@ import pytest
 import tensorflow as tf
 
 import config
-from src.evaluate import SIX_CLASS_NAMES
+from src.data import _safe_class_weights
+from src.evaluate import KMU_CODE_TO_FER_NAME, SIX_CLASS_NAMES
+from src.kmu_fed_data import PUBLISHED_SUBJECT_CLASS_COUNTS
 from src.train_kmu_fed_finetune import (
     UNFREEZE_FROM,
     _append_runs_csv,
@@ -97,3 +99,21 @@ def test_append_runs_csv_writes_header_once(tmp_path) -> None:
     lines = runs_path.read_text().splitlines()
     assert len(lines) == 3  # header + 2 rows
     assert lines[0].startswith("run_name,model,date")
+
+
+def test_class_weights_upweight_disgust_on_the_real_train_split() -> None:
+    """The 8 train subjects give disgust only 60 of 700 images (vs 120-160 for every other
+    class) - the first fine-tuning run (no class weights) completely failed to learn it.
+    Reuses src.data's own capped square-root weighting (not a re-implementation)."""
+    y = []
+    for sid in config.KMU_FED["train_subjects"]:
+        for code, n in PUBLISHED_SUBJECT_CLASS_COUNTS[sid].items():
+            y.extend([SIX_CLASS_NAMES.index(KMU_CODE_TO_FER_NAME[code])] * n)
+    y = np.array(y)
+    assert len(y) == 700
+
+    weights = _safe_class_weights(y, num_classes=len(SIX_CLASS_NAMES))
+    disgust_idx = SIX_CLASS_NAMES.index("disgust")
+    happy_idx = SIX_CLASS_NAMES.index("happy")  # the most common class in this split
+    assert weights[disgust_idx] > weights[happy_idx]
+    assert weights[disgust_idx] < config.CLASS_WEIGHT_MAX  # capped, not the raw ~2x imbalance ratio

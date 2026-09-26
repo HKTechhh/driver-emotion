@@ -9,9 +9,12 @@ For the chosen base model, replaces its final "predictions" Dense layer with a f
 the last conv block (reusing src.models.vgg16_tl.unfreeze_top - the exact function
 vgg16_v1's own stage-2 training used, not a re-implementation of it), and fine-tunes on
 KMU-FED's 8 train subjects with heavier augmentation than FER2013's own (src/data.py),
-since well under 900 images makes overfitting the default outcome, not an edge case.
-Validates on the 2 val subjects, early-stops on val_accuracy, and evaluates only on the 2
-held-out test subjects (never seen in training or fine-tuning).
+since well under 900 images makes overfitting the default outcome, not an edge case, and
+with class weights (reusing src.data's own capped square-root weighting, not a
+re-implementation) since disgust gets only 60 of 700 training images - the first
+fine-tuning run (no class weights) completely failed to learn disgust at all. Validates on
+the 2 val subjects, early-stops on val_accuracy, and evaluates only on the 2 held-out test
+subjects (never seen in training or fine-tuning).
 
 KMU-FED is tiny, so every subject's face crop is detected once and held in memory rather
 than built into a lazy tf.data pipeline from disk.
@@ -37,6 +40,7 @@ import tensorflow as tf
 from sklearn.metrics import classification_report, confusion_matrix
 
 from config import EARLY_STOP_PATIENCE, KMU_FED, LR_FACTOR, LR_PATIENCE, MODELS_DIR, REALTIME, RESULTS_DIR, SEED
+from src.data import _safe_class_weights
 from src.evaluate import KMU_CODE_TO_FER_NAME, SIX_CLASS_NAMES, _save_confusion_matrices
 from src.kmu_fed_data import parse_filename
 from src.models.vgg16_tl import unfreeze_top
@@ -195,6 +199,15 @@ def main() -> None:
     train_ds = _make_dataset(x_train, y_train, args.model, args.batch_size, augment=True)
     val_ds = _make_dataset(x_val, y_val, args.model, args.batch_size, augment=False)
 
+    # Reuses src.data's own capped square-root class weighting (config.CLASS_WEIGHT_MODE/
+    # CLASS_WEIGHT_MAX) rather than duplicating it - the same fix this project already made
+    # for FER2013's imbalance (disgust ~9.5x with plain "balanced" weights destabilised
+    # training there too). KMU-FED's 8 train subjects give disgust only 60 of 700 images
+    # (vs 120-160 for every other class), and the first fine-tuning run completely failed to
+    # learn disgust (and, for the CNN, angry too) - a classic imbalance symptom.
+    class_weight = _safe_class_weights(y_train, num_classes=len(SIX_CLASS_NAMES))
+    print("Class weights:", {SIX_CLASS_NAMES[c]: round(w, 2) for c, w in class_weight.items()})
+
     model = build_finetune_model(base_model, args.model)
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=args.lr),
@@ -210,7 +223,10 @@ def main() -> None:
     ]
 
     start = time.time()
-    history = model.fit(train_ds, validation_data=val_ds, epochs=args.epochs, callbacks=callbacks, verbose=2)
+    history = model.fit(
+        train_ds, validation_data=val_ds, epochs=args.epochs, callbacks=callbacks,
+        class_weight=class_weight, verbose=2,
+    )
     train_minutes = (time.time() - start) / 60
     epochs_run = len(history.history["loss"])
     best_val_acc = max(history.history["val_accuracy"])

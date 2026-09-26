@@ -1,0 +1,66 @@
+{
+  "run_name": "cnn_kmufed_ft_v1",
+  "model": "custom_cnn",
+  "base_model_path": "models/cnn_v1.keras",
+  "test_subjects": [
+    2,
+    11
+  ],
+  "n_train": 700,
+  "n_val": 246,
+  "n_test_evaluated": 160,
+  "n_test_no_face": 0,
+  "accuracy": 0.58125,
+  "macro_f1": 0.5185289246421388,
+  "classification_report": {
+    "angry": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 30.0
+    },
+    "disgust": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 20.0
+    },
+    "fear": {
+      "precision": 1.0,
+      "recall": 0.6,
+      "f1-score": 0.75,
+      "support": 40.0
+    },
+    "happy": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 10.0
+    },
+    "sad": {
+      "precision": 0.22988505747126436,
+      "recall": 1.0,
+      "f1-score": 0.37383177570093457,
+      "support": 20.0
+    },
+    "surprise": {
+      "precision": 1.0,
+      "recall": 0.975,
+      "f1-score": 0.9873417721518988,
+      "support": 40.0
+    },
+    "accuracy": 0.58125,
+    "macro avg": {
+      "precision": 0.5383141762452107,
+      "recall": 0.5958333333333333,
+      "f1-score": 0.5185289246421388,
+      "support": 160.0
+    },
+    "weighted avg": {
+      "precision": 0.5912356321839081,
+      "recall": 0.58125,
+      "f1-score": 0.5435644150005915,
+      "support": 160.0
+    }
+  }
+}

@@ -18,6 +18,7 @@ from src.train_kmu_fed_finetune import (
     UNFREEZE_FROM,
     _append_runs_csv,
     _build_finetune_augmentation,
+    _oversample_to_balance,
     _raw_arrays,
     build_finetune_model,
 )
@@ -117,3 +118,31 @@ def test_class_weights_upweight_disgust_on_the_real_train_split() -> None:
     happy_idx = SIX_CLASS_NAMES.index("happy")  # the most common class in this split
     assert weights[disgust_idx] > weights[happy_idx]
     assert weights[disgust_idx] < config.CLASS_WEIGHT_MAX  # capped, not the raw ~2x imbalance ratio
+
+
+def test_oversample_to_balance_evens_out_the_real_train_split() -> None:
+    """Class weighting (above) upweighted disgust's loss but didn't fix it learning nothing
+    (0/0/0 precision/recall/f1) - this duplicates disgust's images directly so every class
+    appears equally often per epoch, attacking the "too few examples" problem more directly."""
+    x, y = [], []
+    for sid in config.KMU_FED["train_subjects"]:
+        for code, n in PUBLISHED_SUBJECT_CLASS_COUNTS[sid].items():
+            label = SIX_CLASS_NAMES.index(KMU_CODE_TO_FER_NAME[code])
+            x.extend([label] * n)  # stand-in "image" = its own label, so we can check duplicates
+            y.extend([label] * n)
+    x = np.array(x)
+    y = np.array(y)
+    assert len(y) == 700
+
+    x_bal, y_bal = _oversample_to_balance(x, y)
+
+    counts = np.bincount(y_bal)
+    assert len(counts) == len(SIX_CLASS_NAMES)
+    assert len(set(counts)) == 1  # every class now appears exactly as often as the majority class
+    assert counts[0] == np.bincount(y).max()
+    # the stand-in "image" values still match their own labels after shuffling/duplicating
+    assert np.array_equal(x_bal, y_bal)
+
+    # reproducible with the module's fixed SEED (same call, no seed argument, twice)
+    x_bal_2, y_bal_2 = _oversample_to_balance(x, y)
+    assert np.array_equal(y_bal, y_bal_2)

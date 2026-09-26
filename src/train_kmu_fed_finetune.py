@@ -9,10 +9,12 @@ For the chosen base model, replaces its final "predictions" Dense layer with a f
 the last conv block (reusing src.models.vgg16_tl.unfreeze_top - the exact function
 vgg16_v1's own stage-2 training used, not a re-implementation of it), and fine-tunes on
 KMU-FED's 8 train subjects with heavier augmentation than FER2013's own (src/data.py),
-since well under 900 images makes overfitting the default outcome, not an edge case, and
-with class weights (reusing src.data's own capped square-root weighting, not a
-re-implementation) since disgust gets only 60 of 700 training images - the first
-fine-tuning run (no class weights) completely failed to learn disgust at all. Validates on
+since well under 900 images makes overfitting the default outcome, not an edge case.
+Disgust gets only 60 of 700 training images (vs 120-160 for every other class); the first
+fine-tuning run (`--balance none`) completely failed to learn it. `--balance` (default
+"oversample") duplicates minority-class train images up to the majority class's count -
+tried after class-weighting the loss (`--balance class_weight`) helped the custom CNN but
+hurt vgg16 and didn't move disgust off 0.0 precision/recall for either model. Validates on
 the 2 val subjects, early-stops on val_accuracy, and evaluates only on the 2 held-out test
 subjects (never seen in training or fine-tuning).
 
@@ -102,6 +104,33 @@ def _raw_arrays(crops: List[np.ndarray], labels: List[str], img_size: int) -> Tu
     return x, y
 
 
+def _oversample_to_balance(x: np.ndarray, y: np.ndarray, seed: int = SEED) -> Tuple[np.ndarray, np.ndarray]:
+    """Duplicate (with replacement) training examples of every under-represented class up to
+    the size of the largest class, so each of the 6 classes appears equally often per epoch.
+
+    Different in kind from class-weighting the loss (tried first: nudged the custom CNN up
+    but the vgg16 result down, and did not move disgust off 0.0 precision/recall for either
+    model - see docs/experiment_log.md): a duplicated example still gets its own fresh random
+    draw from `_build_finetune_augmentation` each time `_make_dataset`'s augmentation map runs
+    (once per epoch, since that map is lazy), so oversampling disgust gives the model more
+    actual gradient updates on differently-augmented views of disgust images, rather than
+    just scaling how much one pass over it counts in the loss.
+    """
+    rng = np.random.default_rng(seed)
+    classes, counts = np.unique(y, return_counts=True)
+    target = int(counts.max())
+    indices = []
+    for c in classes:
+        class_indices = np.where(y == c)[0]
+        indices.append(class_indices)
+        shortfall = target - len(class_indices)
+        if shortfall > 0:
+            indices.append(rng.choice(class_indices, size=shortfall, replace=True))
+    all_indices = np.concatenate(indices)
+    rng.shuffle(all_indices)
+    return x[all_indices], y[all_indices]
+
+
 def _build_finetune_augmentation() -> tf.keras.Sequential:
     """Heavier than FER2013's own augmentation (src/data.py's _build_augmentation): KMU-FED's
     fine-tuning set is well under 900 images, small enough that overfitting is the default
@@ -170,6 +199,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--out-name", dest="out_name", type=str, default=None,
         help="Defaults to '{model}_kmufed_ft_v1' -> models/{out_name}.keras.",
     )
+    parser.add_argument(
+        "--balance", choices=["none", "class_weight", "oversample"], default="oversample",
+        help="How to handle KMU-FED's class imbalance (disgust: 60/700 train images, vs "
+             "120-160 for every other class). 'oversample' (default) duplicates minority-"
+             "class train images up to the majority class's count, so augmentation still "
+             "gives each duplicate a different view each epoch. 'class_weight' reweights the "
+             "loss instead - tried first, improved the custom CNN but hurt vgg16, and did not "
+             "move disgust off 0.0 precision/recall for either model. 'none' applies neither.",
+    )
     return parser
 
 
@@ -196,17 +234,25 @@ def main() -> None:
 
     x_train, y_train = _raw_arrays(train_crops, train_labels, img_size)
     x_val, y_val = _raw_arrays(val_crops, val_labels, img_size)
+
+    # KMU-FED's 8 train subjects give disgust only 60 of 700 images (vs 120-160 for every
+    # other class); the first fine-tuning run (--balance none) completely failed to learn
+    # disgust (and, for the CNN, angry too) - a classic imbalance symptom.
+    class_weight = None
+    if args.balance == "oversample":
+        n_before = len(y_train)
+        x_train, y_train = _oversample_to_balance(x_train, y_train)
+        print(f"Oversampled train set from {n_before} to {len(y_train)} images "
+              f"(every class now has {np.bincount(y_train).max()})")
+    elif args.balance == "class_weight":
+        # Reuses src.data's own capped square-root class weighting (config.CLASS_WEIGHT_MODE/
+        # CLASS_WEIGHT_MAX), not a re-implementation - the same fix this project already made
+        # for FER2013's imbalance. Tried first; kept available via --balance for comparison.
+        class_weight = _safe_class_weights(y_train, num_classes=len(SIX_CLASS_NAMES))
+        print("Class weights:", {SIX_CLASS_NAMES[c]: round(w, 2) for c, w in class_weight.items()})
+
     train_ds = _make_dataset(x_train, y_train, args.model, args.batch_size, augment=True)
     val_ds = _make_dataset(x_val, y_val, args.model, args.batch_size, augment=False)
-
-    # Reuses src.data's own capped square-root class weighting (config.CLASS_WEIGHT_MODE/
-    # CLASS_WEIGHT_MAX) rather than duplicating it - the same fix this project already made
-    # for FER2013's imbalance (disgust ~9.5x with plain "balanced" weights destabilised
-    # training there too). KMU-FED's 8 train subjects give disgust only 60 of 700 images
-    # (vs 120-160 for every other class), and the first fine-tuning run completely failed to
-    # learn disgust (and, for the CNN, angry too) - a classic imbalance symptom.
-    class_weight = _safe_class_weights(y_train, num_classes=len(SIX_CLASS_NAMES))
-    print("Class weights:", {SIX_CLASS_NAMES[c]: round(w, 2) for c, w in class_weight.items()})
 
     model = build_finetune_model(base_model, args.model)
     model.compile(

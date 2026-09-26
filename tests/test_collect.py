@@ -10,12 +10,15 @@ import cv2
 import numpy as np
 import pytest
 
+import json
+
 import config
 from app_collect import (
     append_log_row,
     fer2013_train_class_counts,
     infer_model_family,
     list_available_models,
+    model_accuracy_info,
     model_class_names,
     sample_video_frames,
     save_crop,
@@ -124,3 +127,37 @@ def test_model_class_names_six_units_is_fer2013_minus_neutral() -> None:
 def test_model_class_names_unsupported_unit_count_raises() -> None:
     with pytest.raises(ValueError):
         model_class_names(_FakeModel(output_units=10))
+
+
+def test_model_accuracy_info_prefers_kmu_fed_test_metrics(tmp_path) -> None:
+    """A KMU-FED fine-tuned model's own held-out test result, not FER2013's, must win - this
+    is exactly the bug being fixed: the app used to show a fixed FER2013 number regardless
+    of which model was selected."""
+    (tmp_path / "cnn_kmufed_ft_v1_kmu_fed_test_metrics.json").write_text(
+        json.dumps({"accuracy": 0.581, "macro_f1": 0.519})
+    )
+    (tmp_path / "comparison.csv").write_text("run_name,accuracy,macro_f1\ncnn_kmufed_ft_v1,0.99,0.99\n")
+
+    info = model_accuracy_info("cnn_kmufed_ft_v1", results_dir=tmp_path)
+    assert info["accuracy"] == pytest.approx(0.581)
+    assert info["source"] == "KMU-FED fine-tuned test subjects"
+
+
+def test_model_accuracy_info_falls_back_to_fer2013_comparison(tmp_path) -> None:
+    (tmp_path / "comparison.csv").write_text("run_name,accuracy,macro_f1\ncnn_v1,0.6753,0.6595\n")
+    info = model_accuracy_info("cnn_v1", results_dir=tmp_path)
+    assert info["accuracy"] == pytest.approx(0.6753)
+    assert info["source"] == "FER2013 test set"
+
+
+def test_model_accuracy_info_falls_back_to_validation_accuracy(tmp_path) -> None:
+    (tmp_path / "runs.csv").write_text(
+        "run_name,best_val_acc,val_macro_f1\ncnn_check,0.3976,0.2409\n"
+    )
+    info = model_accuracy_info("cnn_check", results_dir=tmp_path)
+    assert info["accuracy"] == pytest.approx(0.3976)
+    assert "validation" in info["source"]
+
+
+def test_model_accuracy_info_returns_none_when_nothing_is_on_record(tmp_path) -> None:
+    assert model_accuracy_info("some_unknown_run", results_dir=tmp_path) is None

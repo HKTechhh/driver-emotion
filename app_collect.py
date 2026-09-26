@@ -17,6 +17,7 @@ Nothing is written to disk on any tab until the sidebar consent checkbox is tick
 Real-time video tab never saves anything at all (it is a live view only).
 """
 import csv
+import json
 import tempfile
 import threading
 import time
@@ -164,6 +165,50 @@ def model_class_names(model) -> List[str]:
         f"No class-name mapping is defined for a model with {units} output units "
         f"(expected {NUM_CLASSES} or {NUM_CLASSES - 1})."
     )
+
+
+def model_accuracy_info(run_name: str, results_dir: Path = RESULTS_DIR) -> Optional[Dict[str, object]]:
+    """Whatever real, measured accuracy this project has on record for `run_name`, so the UI
+    can show the actual number for whichever model is selected - not a fixed FER2013 number
+    that stays the same no matter which .keras file is picked.
+
+    Checks, in order: a KMU-FED fine-tuned model's held-out test metrics
+    (results/{run_name}_kmu_fed_test_metrics.json - src.train_kmu_fed_finetune's output),
+    then FER2013 test accuracy (results/comparison.csv), then falls back to validation
+    accuracy from results/runs.csv (clearly labelled as such) for a run that was never
+    formally evaluated on a test set (e.g. a smoke-test or a since-superseded run).
+    Returns None if nothing at all is on record for it.
+    """
+    results_dir = Path(results_dir)
+
+    kmu_path = results_dir / f"{run_name}_kmu_fed_test_metrics.json"
+    if kmu_path.exists():
+        with open(kmu_path) as f:
+            m = json.load(f)
+        return {"accuracy": m["accuracy"], "macro_f1": m["macro_f1"], "source": "KMU-FED fine-tuned test subjects"}
+
+    comparison_path = results_dir / "comparison.csv"
+    if comparison_path.exists():
+        df = pd.read_csv(comparison_path)
+        row = df[df["run_name"] == run_name]
+        if not row.empty:
+            return {
+                "accuracy": float(row.iloc[0]["accuracy"]), "macro_f1": float(row.iloc[0]["macro_f1"]),
+                "source": "FER2013 test set",
+            }
+
+    runs_path = results_dir / "runs.csv"
+    if runs_path.exists():
+        df = pd.read_csv(runs_path)
+        row = df[df["run_name"] == run_name]
+        if not row.empty and pd.notna(row.iloc[0]["best_val_acc"]):
+            macro_f1 = row.iloc[0].get("val_macro_f1")
+            return {
+                "accuracy": float(row.iloc[0]["best_val_acc"]),
+                "macro_f1": float(macro_f1) if pd.notna(macro_f1) else None,
+                "source": "validation set only - never formally evaluated on a test set",
+            }
+    return None
 
 
 def save_crop(crop_bgr: np.ndarray, label: str, filename_stem: str, dest_root: Path = COLLECTED_DIR) -> Path:
@@ -723,15 +768,29 @@ def _render_analytics_tab() -> None:
         st.dataframe(filtered.sort_values("timestamp", ascending=False).head(20))
 
 
-def _render_about_tab() -> None:
+def _render_about_tab(selected: str) -> None:
     st.subheader("About this project", icon=":material/info:")
     st.markdown(
         "This tool analyses a driver's facial expression from an image, a video, or a live "
-        "webcam feed, using one of two models trained from scratch on FER2013: a compact "
-        "custom CNN and a fine-tuned VGG16."
+        "webcam feed, using models trained on FER2013 and, for the two `*_kmufed_ft_v1` "
+        "options, fine-tuned further on real in-cabin photos (KMU-FED)."
     )
+
     with st.container(border=True):
-        st.markdown("**Measured results (full FER2013 test set, 7,178 images)**")
+        st.markdown(f"**Currently selected: `{selected}`**")
+        info = model_accuracy_info(selected)
+        if info:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("Accuracy", f"{info['accuracy'] * 100:.1f}%", border=True)
+            with col_b:
+                st.metric("Macro-F1", f"{info['macro_f1']:.3f}" if info["macro_f1"] is not None else "-", border=True)
+            st.caption(f"Measured on: {info['source']}.")
+        else:
+            st.caption("No evaluation metrics on record for this model.")
+
+    with st.container(border=True):
+        st.markdown("**For reference: the two original FER2013 models (full test set, 7,178 images)**")
         col_a, col_b = st.columns(2)
         with col_a:
             st.metric("Custom CNN accuracy", "67.5%", border=True)
@@ -837,6 +896,13 @@ def main() -> None:
     detect_fn = _cached_detector()
     with st.sidebar:
         st.badge(f"Preprocessing: {model_family}", icon=":material/memory:", color="violet")
+        info = model_accuracy_info(selected)
+        if info:
+            st.metric(f"Accuracy ({info['source']})", f"{info['accuracy'] * 100:.1f}%", border=True)
+            if info["macro_f1"] is not None:
+                st.caption(f"macro-F1: {info['macro_f1']:.3f}")
+        else:
+            st.caption(f"No evaluation metrics on record for '{selected}'.")
 
     tab_images, tab_realtime, tab_video, tab_analytics, tab_about = st.tabs([
         ":material/photo_camera: Image upload",
@@ -854,7 +920,7 @@ def main() -> None:
     with tab_analytics:
         _render_analytics_tab()
     with tab_about:
-        _render_about_tab()
+        _render_about_tab(selected)
 
 
 if __name__ == "__main__":

@@ -13,10 +13,14 @@ coding conventions are in [`.cursor/rules/project.mdc`](.cursor/rules/project.md
 
 **Status:** models trained, evaluated, stress-tested and explained; a live webcam spot
 check confirmed the real-time app; the Netron / TensorBoard / app screenshots are in the
-paper; all 9 build phases are complete. What's left needs a person, not a computer:
-verifying the paper's references, choosing the final format/page limit, and (optionally)
-a longer live session with drivers. See `PLAN.md` (progress tracker) and
-`docs/experiment_log.md` (every run, decision and bug).
+paper; all 9 build phases are complete. Both models have also been fine-tuned on a real
+in-cabin dataset (KMU-FED, see below) and both fine-tuned checkpoints are wired into
+`app_collect.py`. **The paper has not been updated with the KMU-FED work yet** — that
+happens once the fine-tuned model has been validated on real driver photos/video, not
+before. What's left otherwise needs a person, not a computer: verifying the paper's
+references, choosing the final format/page limit, and (optionally) a longer live session
+with drivers. See `PLAN.md` (progress tracker) and `docs/experiment_log.md` (every run,
+decision and bug).
 
 ## Results (FER2013, full 7,178-image test set)
 
@@ -44,11 +48,62 @@ models (the CNN's 28.6% is only ~4 points above always answering *happy*). The
 real-time app has been verified on simulated frames but not yet live. Details, per-class
 results and the failure analysis are in `docs/experiment_log.md` and `paper/paper.md`.
 
+## In-car fine-tuning (KMU-FED)
+
+Both models were also evaluated and fine-tuned on [KMU-FED](https://www.kaggle.com/datasets/anandpanajkar/kmu-fed),
+a real in-cabin driver dataset (1,106 NIR/night-vision-style photos, 12 subjects, 6
+emotions — no "neutral"), to measure and close the gap between FER2013's web photos and
+an actual driving cabin. Full methodology (subject-level 8/2/2 split, why it's
+seed-constrained on disgust coverage, three imbalance-handling attempts) is in
+`docs/experiment_log.md`; only the headline numbers are here.
+
+**Step 1 — domain-gap baseline** (both FER2013 models, unchanged, evaluated on KMU-FED's
+held-out test subjects):
+
+| | Custom CNN | VGG16 |
+|---|---|---|
+| FER2013 test accuracy | 67.5% | 65.8% |
+| KMU-FED accuracy (no fine-tuning) | 25.6% | 36.3% |
+| Accuracy drop | -41.9 pts | -29.6 pts |
+
+**Step 2 — after fine-tuning** (fresh 6-unit head, last conv block + head unfrozen,
+`--balance oversample` to counter disgust's scarcity — 60 of 700 train images vs.
+120-160 for every other class):
+
+| | `cnn_kmufed_ft_v1` | `vgg16_kmufed_ft_v1` |
+|---|---|---|
+| KMU-FED test accuracy | **63.1%** | **76.9%** |
+| Macro-F1 | 0.560 | 0.725 |
+
+Both recover most of the domain-gap loss from well under 900 fine-tuning images.
+**Caveats that matter before trusting these numbers:** only 160 test images from 2
+held-out subjects; a single training run per model (no seeds averaged); *disgust* is
+essentially unlearned — the CNN gets it right once (1 of 20 images) after oversampling,
+VGG16 still gets 0/0/0 precision/recall/F1 under every imbalance-handling strategy
+tried; and KMU-FED, while a real in-cabin dataset, is still 12 people in one room, not a
+moving vehicle across lighting conditions. Two imbalance-handling attempts before
+oversampling (none, then class-weighting) are also logged in `docs/experiment_log.md`
+for the full before/after comparison.
+
+Both fine-tuned models are already selectable in `app_collect.py`'s model dropdown
+alongside the original two — `model_class_names()` and `model_accuracy_info()` in that
+file detect a model's output size and read its own result file, so the app's class
+labels, sidebar accuracy badge and About tab automatically show the right numbers for
+whichever model is selected, with no per-model special-casing needed elsewhere in the
+app.
+
+To re-run this yourself on Kaggle (needs a GPU and takes over an hour for VGG16):
+`notebooks/kmu_fed_step1_step2_kaggle_cell.py` (see the docstring at the top of that
+file for the two Kaggle inputs it needs — the KMU-FED dataset and a private dataset with
+`cnn_v1.keras`/`vgg16_v1.keras`).
+
 ## Setup
 
 Requires Python 3.11 (TensorFlow/MediaPipe don't yet support newer Pythons). This
 project uses [`uv`](https://github.com/astral-sh/uv) to manage that regardless of your
 system Python version.
+
+**macOS/Linux:**
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # if uv isn't already installed
@@ -57,7 +112,16 @@ uv pip install --python .venv/bin/python -r requirements.txt
 source .venv/bin/activate
 ```
 
-Verify the install:
+**Windows (PowerShell):**
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # if uv isn't already installed
+uv venv --python 3.11 .venv
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+.venv\Scripts\Activate.ps1
+```
+
+Verify the install (same command on any OS, once the venv is active):
 
 ```bash
 python -c "import tensorflow as tf, cv2, mediapipe, sklearn; print('TF', tf.__version__, '| GPU:', tf.config.list_physical_devices('GPU'))"
@@ -71,6 +135,23 @@ Run the tests:
 ```bash
 python -m pytest -q
 ```
+
+**Model files (`models/*.keras`) are gitignored** — a plain `git clone` will not include
+them. If you got this project as a handoff zip, they're already in `models/`; if you
+cloned from GitHub instead, you'll need to either receive them separately or retrain (see
+`## Training` below and, for the KMU-FED fine-tuned models, the Kaggle notebook
+referenced in the section above).
+
+**Windows-specific notes for the real-time/browser apps:**
+- `src/realtime.py`'s webcam backend defaults to `auto`, which already tries `dshow` and
+  `msmf` after the platform default fails — pass `--backend dshow` or `--backend msmf`
+  explicitly if the camera window never opens.
+- Long paths: if `pip`/`uv` complains about path length while installing TensorFlow,
+  enable Windows' long-path support (`Settings > System > For developers > Enable long
+  paths`, or `git config --system core.longpaths true`).
+- Use PowerShell or the Windows Terminal, not `cmd.exe` — the activation script above
+  (`Activate.ps1`) needs PowerShell; `cmd.exe` would need `.venv\Scripts\activate.bat`
+  instead.
 
 ## Data
 
@@ -145,6 +226,10 @@ python -m src.evaluate --model vgg16 --model-path models/vgg16_v1.keras
 Writes `results/{run_name}_metrics.json` (accuracy, macro/weighted F1, full per-class
 `classification_report`, param count, file size, and single-image inference
 latency/FPS) plus confusion matrix heatmaps in `results/figures/`.
+
+`--dataset kmu_fed` instead runs the Step 1 domain-gap baseline described above (both
+`models/cnn_v1.keras`/`models/vgg16_v1.keras`, unchanged, on KMU-FED's held-out test
+subjects) — needs `data/raw/kmu_fed/` populated (see the KMU-FED section above).
 
 ### Comparison (`src/compare.py`)
 
@@ -254,10 +339,13 @@ src/
   significance.py             # bootstrap CIs + McNemar test for the CNN-vs-VGG16 gap
   plot_architecture.py       # visualkeras architecture diagrams
   realtime.py                # live webcam driver-emotion app
+  kmu_fed_data.py             # KMU-FED subject-level split (Step 1)
+  train_kmu_fed_finetune.py    # fine-tune cnn_v1/vgg16_v1 on KMU-FED (Step 2)
   models/
     custom_cnn.py             # Model A builder
     vgg16_tl.py                # Model B builder + two-stage fine-tuning helper
 notebooks/01_eda.ipynb    # class distribution, sample grid, image properties
+notebooks/kmu_fed_*.py       # Kaggle cells: KMU-FED inspection, then Steps 1+2 end to end
 tests/                     # pytest
 docs/experiment_log.md      # dated log of every run and decision
 docs/car_deployment_guide.md # hardware/wiring/mounting/safety guide for running this in a real car

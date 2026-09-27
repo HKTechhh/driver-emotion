@@ -9,11 +9,14 @@ DRAFT STATUS (delete this block before sharing)
 # From Laptop Demo to In-Car Prototype: A Deployment Guide
 
 This is a practical guide to taking the driver-emotion model out of the lab and into an actual vehicle,
-written for whoever picks up this project next. It assumes you have `cnn_v1.keras` (or `vgg16_v1.keras`)
-and a working `src/realtime.py`, and it walks through the hardware, wiring, mounting and software choices,
-plus the safety and legal issues that come with pointing a camera at a driver. It is not a certified
-automotive design, and none of what follows should be read as a claim that this system is ready to
-influence how someone actually drives.
+written for whoever picks up this project next. It assumes you have `cnn_v1.keras`/`vgg16_v1.keras` (the
+FER2013-trained models) and, since it now exists, likely `models/cnn_kmufed_ft_v1.keras`/
+`models/vgg16_kmufed_ft_v1.keras` too (fine-tuned on a real in-cabin NIR dataset, KMU-FED — see the
+README's "In-car fine-tuning" section and `docs/experiment_log.md` for the full numbers and caveats), plus
+a working `src/realtime.py`. It walks through the hardware, wiring, mounting and software choices, plus
+the safety and legal issues that come with pointing a camera at a driver. It is not a certified automotive
+design, and none of what follows should be read as a claim that this system is ready to influence how
+someone actually drives.
 
 ## 1. Prove it cheaply before you build anything
 
@@ -34,7 +37,12 @@ asking the person on camera to consent to.
 
 The custom CNN is small (4.8 M parameters) and, as measured in Section 4.4 of the paper, runs at about
 25 FPS for the model alone on a 2019 laptop CPU (Intel Core i5-8265U) with no GPU. That is comfortably
-within reach of a single-board computer, so a full in-car PC is overkill for this model.
+within reach of a single-board computer, so a full in-car PC is overkill for this model. File size/param
+count are essentially unchanged for the KMU-FED fine-tuned versions (same architecture, only the final
+layer and adjacent conv block changed), so the same hardware sizing applies whether you deploy
+`cnn_v1.keras`/`vgg16_v1.keras` or `cnn_kmufed_ft_v1.keras`/`vgg16_kmufed_ft_v1.keras` - but deploy one of
+the fine-tuned pair if the camera is IR/NIR (Section 3), since the originals were never adapted to that
+domain.
 
 | Option | Rough cost | Notes |
 |---|---|---|
@@ -56,12 +64,25 @@ light webcam will not work after dark.
 
 The usual fix in commercial driver-monitoring systems is a near-infrared (NIR) camera with its own IR LED
 illuminator, which works in complete darkness and is not blinding to the driver. This is a genuine
-hardware fix, but it comes with a catch worth stating plainly: **the model in this project was trained
-entirely on visible-light FER2013 images.** An IR camera produces a different-looking image (no colour,
-different contrast, specular reflections off glasses), and this project has not tested, let alone
-retrained, on IR footage. Buying an IR camera does not by itself fix the low-light result - it changes the
-problem to "train or fine-tune on IR data," which is listed as future work in the paper (Section 5.5) and
-is a project of its own, not a weekend task.
+hardware fix, and it is now backed by real fine-tuning work, not just a plan: **the original two models
+were trained entirely on visible-light FER2013 images, but both have since been fine-tuned on KMU-FED, a
+real NIR/night-vision-style in-cabin dataset** (12 subjects, 1,106 photos - see the README's "In-car
+fine-tuning" section and `docs/experiment_log.md` for the full methodology). The fine-tuned checkpoints,
+`models/cnn_kmufed_ft_v1.keras` and `models/vgg16_kmufed_ft_v1.keras`, are the ones to deploy behind an IR
+camera, not the original `cnn_v1`/`vgg16_v1`, which were never adapted to this domain at all (see Section 2
+below).
+
+That said, this closes the gap partway, not completely - three things still stand between "fine-tuned on
+an NIR dataset" and "ready for a real IR camera in a moving car": (1) KMU-FED's photos are a controlled,
+stationary in-cabin capture, not live video from a car in motion under changing headlight/streetlight
+conditions; (2) *disgust* is essentially unlearned - `vgg16_kmufed_ft_v1` scores 0.0 precision/recall/F1 on
+it no matter which imbalance-handling strategy was tried, and the CNN gets it right only once in 20 test
+images; (3) both fine-tuned models were evaluated on only 2 held-out subjects (160 images total), a single
+training run each, so treat the 63-77% accuracy range as a real but noisy estimate, not a tight bound. None
+of this means an IR camera is pointless - it is a large, measured improvement over feeding a visible-light
+camera's low-light frames to a model that never saw NIR images at all - but re-measuring accuracy on
+whatever camera you actually buy, rather than assuming the KMU-FED numbers transfer directly, is still
+worth doing before trusting the result.
 
 | Option | Rough cost | Notes |
 |---|---|---|
@@ -200,10 +221,16 @@ listings before buying.
 
 ## 11. What this does not solve
 
-None of the hardware above closes the gaps the paper is explicit about (Section 5.5): the model was
-trained and tested on FER2013 web photos, not in-cabin footage; the driving conditions in Section 4.5 are
-simulated corruptions of those photos, not real recordings from a moving car; each model was trained once,
-so its behaviour on a different day's lighting or a different face shape is untested; and the one live
-session run so far (Section 3.9, Appendix in the experiment log) was 42 minutes with one person in one
-room, not a validated in-vehicle evaluation. Building the box in this guide gets the model physically
-running in a car. It does not, by itself, make the model's predictions trustworthy enough to act on.
+None of the hardware above closes every gap the paper is explicit about (Section 5.5), though one of them
+is now partly addressed rather than purely theoretical: the original models were trained and tested only on
+FER2013 web photos, and that gap is why KMU-FED fine-tuning (Section 3, and the README) exists - it is a
+real, measured step toward in-cabin conditions, not a simulation of one. What is still open: KMU-FED itself
+is 12 people in one stationary room, not live footage from a moving car across changing light; the driving
+conditions in Section 4.5 are simulated corruptions of FER2013 photos, not real recordings either; each
+model (both the original and the fine-tuned pair) was trained once, so behaviour on a different day's
+lighting or a different face shape is untested; *disgust* does not work in the fine-tuned models regardless
+of the imbalance-handling strategy tried (see Section 3); and the one live session run so far (Section 3.9,
+Appendix in the experiment log) used `cnn_v1` on visible light, 42 minutes with one person in one room, not
+a validated in-vehicle evaluation, and has not yet been repeated with the fine-tuned checkpoints or an IR
+camera. Building the box in this guide gets a model physically running in a car. It does not, by itself,
+make either model's predictions trustworthy enough to act on.
